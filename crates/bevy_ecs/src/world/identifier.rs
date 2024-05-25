@@ -58,7 +58,7 @@ unsafe impl SystemParam for WorldId {
 
     unsafe fn get_param<'world, 'state>(
         _: &'state mut Self::State,
-        _: &crate::system::SystemMeta,
+        _: &'state crate::system::SystemMeta,
         world: UnsafeWorldCell<'world>,
         _: Tick,
     ) -> Self::Item<'world, 'state> {
@@ -74,7 +74,7 @@ impl ExclusiveSystemParam for WorldId {
         world.id()
     }
 
-    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
         *state
     }
 }

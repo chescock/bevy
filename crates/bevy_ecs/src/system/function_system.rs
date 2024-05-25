@@ -26,7 +26,7 @@ pub struct SystemMeta {
     // SystemParams from overriding each other
     is_send: bool,
     has_deferred: bool,
-    pub(crate) last_run: Tick,
+    pub(crate) this_run: Tick,
     #[cfg(feature = "trace")]
     pub(crate) system_span: Span,
     #[cfg(feature = "trace")]
@@ -42,7 +42,7 @@ impl SystemMeta {
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
             has_deferred: false,
-            last_run: Tick::new(0),
+            this_run: Tick::new(0),
             #[cfg(feature = "trace")]
             system_span: info_span!("system", name = name),
             #[cfg(feature = "trace")]
@@ -192,7 +192,7 @@ impl<Param: SystemParam> SystemState<Param> {
     /// manually before calling `get_manual{_mut}`.
     pub fn new(world: &mut World) -> Self {
         let mut meta = SystemMeta::new::<Param>();
-        meta.last_run = world.change_tick().relative_to(Tick::MAX);
+        meta.this_run = world.change_tick().relative_to(Tick::MAX);
         let param_state = Param::init_state(world, &mut meta);
         Self {
             meta,
@@ -370,11 +370,10 @@ impl<Param: SystemParam> SystemState<Param> {
         world: UnsafeWorldCell<'w>,
         change_tick: Tick,
     ) -> SystemParamItem<'w, 's, Param> {
+        let last_run = self.meta.this_run;
+        self.meta.this_run = change_tick;
         // SAFETY: The invariants are uphold by the caller.
-        let param =
-            unsafe { Param::get_param(&mut self.param_state, &self.meta, world, change_tick) };
-        self.meta.last_run = change_tick;
-        param
+        unsafe { Param::get_param(&mut self.param_state, &self.meta, world, last_run) }
     }
 }
 
@@ -516,7 +515,8 @@ where
         #[cfg(feature = "trace")]
         let _span_guard = self.system_meta.system_span.enter();
 
-        let change_tick = world.increment_change_tick();
+        let last_run = self.system_meta.this_run;
+        self.system_meta.this_run = world.increment_change_tick();
 
         // SAFETY:
         // - The caller has invoked `update_archetype_component_access`, which will panic
@@ -528,12 +528,10 @@ where
                 self.param_state.as_mut().expect(Self::PARAM_MESSAGE),
                 &self.system_meta,
                 world,
-                change_tick,
+                last_run,
             )
         };
-        let out = self.func.run(input, params);
-        self.system_meta.last_run = change_tick;
-        out
+        self.func.run(input, params)
     }
 
     #[inline]
@@ -554,7 +552,7 @@ where
             self.world_id = Some(world.id());
             self.param_state = Some(F::Param::init_state(world, &mut self.system_meta));
         }
-        self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
+        self.system_meta.this_run = world.change_tick().relative_to(Tick::MAX);
     }
 
     fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
@@ -573,7 +571,7 @@ where
     #[inline]
     fn check_change_tick(&mut self, change_tick: Tick) {
         check_system_change_tick(
-            &mut self.system_meta.last_run,
+            &mut self.system_meta.this_run,
             change_tick,
             self.system_meta.name.as_ref(),
         );
@@ -585,11 +583,11 @@ where
     }
 
     fn get_last_run(&self) -> Tick {
-        self.system_meta.last_run
+        self.system_meta.this_run
     }
 
     fn set_last_run(&mut self, last_run: Tick) {
-        self.system_meta.last_run = last_run;
+        self.system_meta.this_run = last_run;
     }
 }
 

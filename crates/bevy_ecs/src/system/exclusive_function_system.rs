@@ -100,7 +100,7 @@ where
     }
 
     fn run(&mut self, input: Self::In, world: &mut World) -> Self::Out {
-        world.last_change_tick_scope(self.system_meta.last_run, |world| {
+        world.last_change_tick_scope(self.system_meta.this_run, |world| {
             #[cfg(feature = "trace")]
             let _span_guard = self.system_meta.system_span.enter();
 
@@ -112,7 +112,7 @@ where
 
             world.flush_commands();
             let change_tick = world.change_tick.get_mut();
-            self.system_meta.last_run.set(*change_tick);
+            self.system_meta.this_run.set(*change_tick);
             *change_tick = change_tick.wrapping_add(1);
 
             out
@@ -128,7 +128,7 @@ where
 
     #[inline]
     fn initialize(&mut self, world: &mut World) {
-        self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
+        self.system_meta.this_run = world.change_tick().relative_to(Tick::MAX);
         self.param_state = Some(F::Param::init(world, &mut self.system_meta));
     }
 
@@ -137,7 +137,7 @@ where
     #[inline]
     fn check_change_tick(&mut self, change_tick: Tick) {
         check_system_change_tick(
-            &mut self.system_meta.last_run,
+            &mut self.system_meta.this_run,
             change_tick,
             self.system_meta.name.as_ref(),
         );
@@ -149,11 +149,11 @@ where
     }
 
     fn get_last_run(&self) -> Tick {
-        self.system_meta.last_run
+        self.system_meta.this_run
     }
 
     fn set_last_run(&mut self, last_run: Tick) {
-        self.system_meta.last_run = last_run;
+        self.system_meta.this_run = last_run;
     }
 }
 

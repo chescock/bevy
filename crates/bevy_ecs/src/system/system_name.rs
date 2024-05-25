@@ -79,9 +79,9 @@ unsafe impl SystemParam for SystemName<'_> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         name: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         _world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         SystemName(name)
     }
@@ -98,7 +98,7 @@ impl ExclusiveSystemParam for SystemName<'_> {
         system_meta.name.clone()
     }
 
-    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
         SystemName(state)
     }
 }

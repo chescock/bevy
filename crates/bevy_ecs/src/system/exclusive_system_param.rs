@@ -23,7 +23,7 @@ pub trait ExclusiveSystemParam: Sized {
     /// Creates a parameter to be passed into an [`ExclusiveSystemParamFunction`].
     ///
     /// [`ExclusiveSystemParamFunction`]: super::ExclusiveSystemParamFunction
-    fn get_param<'s>(state: &'s mut Self::State, system_meta: &SystemMeta) -> Self::Item<'s>;
+    fn get_param<'s>(state: &'s mut Self::State, system_meta: &'s SystemMeta) -> Self::Item<'s>;
 }
 
 /// Shorthand way of accessing the associated type [`ExclusiveSystemParam::Item`]
@@ -40,7 +40,7 @@ impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> ExclusiveSystemParam
         QueryState::new(world)
     }
 
-    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
         state
     }
 }
@@ -53,7 +53,7 @@ impl<'a, P: SystemParam + 'static> ExclusiveSystemParam for &'a mut SystemState<
         SystemState::new(world)
     }
 
-    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
         state
     }
 }
@@ -66,7 +66,7 @@ impl<'_s, T: FromWorld + Send + 'static> ExclusiveSystemParam for Local<'_s, T> 
         SyncCell::new(T::from_world(world))
     }
 
-    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
         Local(state.get())
     }
 }
@@ -77,7 +77,7 @@ impl<S: ?Sized> ExclusiveSystemParam for PhantomData<S> {
 
     fn init(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
 
-    fn get_param<'s>(_state: &'s mut Self::State, _system_meta: &SystemMeta) -> Self::Item<'s> {
+    fn get_param<'s>(_state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
         PhantomData
     }
 }
@@ -99,7 +99,7 @@ macro_rules! impl_exclusive_system_param_tuple {
             #[allow(clippy::unused_unit)]
             fn get_param<'s>(
                 state: &'s mut Self::State,
-                system_meta: &SystemMeta,
+                system_meta: &'s SystemMeta,
             ) -> Self::Item<'s> {
 
                 let ($($param,)*) = state;

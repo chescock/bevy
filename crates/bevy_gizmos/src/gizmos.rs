@@ -190,18 +190,13 @@ where
 
     unsafe fn get_param<'w, 's>(
         state: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         // SAFETY: Delegated to existing `SystemParam` implementations
         let (f0, f1) = unsafe {
-            GizmosState::<Config, Clear>::get_param(
-                &mut state.state,
-                system_meta,
-                world,
-                change_tick,
-            )
+            GizmosState::<Config, Clear>::get_param(&mut state.state, system_meta, world, last_run)
         };
         // Accessing the GizmoConfigStore in the immediate mode API reduces performance significantly.
         // Implementing SystemParam manually allows us to do it to here

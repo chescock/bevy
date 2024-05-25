@@ -170,9 +170,9 @@ pub unsafe trait SystemParam: Sized {
     /// - `world` must be the same `World` that was used to initialize [`state`](SystemParam::init_state).
     unsafe fn get_param<'world, 'state>(
         state: &'state mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'state SystemMeta,
         world: UnsafeWorldCell<'world>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'world, 'state>;
 }
 
@@ -237,14 +237,14 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Qu
     #[inline]
     unsafe fn get_param<'w, 's>(
         state: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         // SAFETY: We have registered all of the query's world accesses,
         // so the caller ensures that `world` has permission to access any
         // world data that the query needs.
-        unsafe { Query::new(world, state, system_meta.last_run, change_tick) }
+        unsafe { Query::new(world, state, last_run, system_meta.this_run) }
     }
 }
 
@@ -410,7 +410,7 @@ pub struct ParamSet<'w, 's, T: SystemParam> {
     param_states: &'s mut T::State,
     world: UnsafeWorldCell<'w>,
     system_meta: SystemMeta,
-    change_tick: Tick,
+    last_run: Tick,
 }
 
 impl_param_set!();
@@ -514,9 +514,9 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         let (ptr, ticks) = world
             .get_resource_with_ticks(component_id)
@@ -532,8 +532,8 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
             ticks: Ticks {
                 added: ticks.added.deref(),
                 changed: ticks.changed.deref(),
-                last_run: system_meta.last_run,
-                this_run: change_tick,
+                last_run,
+                this_run: system_meta.this_run,
             },
         }
     }
@@ -554,9 +554,9 @@ unsafe impl<'a, T: Resource> SystemParam for Option<Res<'a, T>> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world
             .get_resource_with_ticks(component_id)
@@ -565,8 +565,8 @@ unsafe impl<'a, T: Resource> SystemParam for Option<Res<'a, T>> {
                 ticks: Ticks {
                     added: ticks.added.deref(),
                     changed: ticks.changed.deref(),
-                    last_run: system_meta.last_run,
-                    this_run: change_tick,
+                    last_run,
+                    this_run: system_meta.this_run,
                 },
             })
     }
@@ -609,9 +609,9 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         let value = world
             .get_resource_mut_by_id(component_id)
@@ -627,8 +627,8 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
             ticks: TicksMut {
                 added: value.ticks.added,
                 changed: value.ticks.changed,
-                last_run: system_meta.last_run,
-                this_run: change_tick,
+                last_run,
+                this_run: system_meta.this_run,
             },
         }
     }
@@ -646,9 +646,9 @@ unsafe impl<'a, T: Resource> SystemParam for Option<ResMut<'a, T>> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world
             .get_resource_mut_by_id(component_id)
@@ -657,8 +657,8 @@ unsafe impl<'a, T: Resource> SystemParam for Option<ResMut<'a, T>> {
                 ticks: TicksMut {
                     added: value.ticks.added,
                     changed: value.ticks.changed,
-                    last_run: system_meta.last_run,
-                    this_run: change_tick,
+                    last_run,
+                    this_run: system_meta.this_run,
                 },
             })
     }
@@ -698,9 +698,9 @@ unsafe impl SystemParam for &'_ World {
 
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         // SAFETY: Read-only access to the entire world was registered in `init_state`.
         unsafe { world.world() }
@@ -812,9 +812,9 @@ unsafe impl<'a, T: FromWorld + Send + 'static> SystemParam for Local<'a, T> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         _world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         Local(state.get())
     }
@@ -1009,9 +1009,9 @@ unsafe impl<T: SystemBuffer> SystemParam for Deferred<'_, T> {
 
     unsafe fn get_param<'w, 's>(
         state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         _world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         Deferred(state.get())
     }
@@ -1117,9 +1117,9 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         let (ptr, ticks) = world
             .get_non_send_with_ticks(component_id)
@@ -1134,8 +1134,8 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
         NonSend {
             value: ptr.deref(),
             ticks: ticks.read(),
-            last_run: system_meta.last_run,
-            this_run: change_tick,
+            last_run,
+            this_run: system_meta.this_run,
         }
     }
 }
@@ -1155,17 +1155,17 @@ unsafe impl<T: 'static> SystemParam for Option<NonSend<'_, T>> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world
             .get_non_send_with_ticks(component_id)
             .map(|(ptr, ticks)| NonSend {
                 value: ptr.deref(),
                 ticks: ticks.read(),
-                last_run: system_meta.last_run,
-                this_run: change_tick,
+                last_run,
+                this_run: system_meta.this_run,
             })
     }
 }
@@ -1209,9 +1209,9 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         let (ptr, ticks) = world
             .get_non_send_with_ticks(component_id)
@@ -1224,7 +1224,7 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
             });
         NonSendMut {
             value: ptr.assert_unique().deref_mut(),
-            ticks: TicksMut::from_tick_cells(ticks, system_meta.last_run, change_tick),
+            ticks: TicksMut::from_tick_cells(ticks, last_run, system_meta.this_run),
         }
     }
 }
@@ -1241,15 +1241,15 @@ unsafe impl<'a, T: 'static> SystemParam for Option<NonSendMut<'a, T>> {
     #[inline]
     unsafe fn get_param<'w, 's>(
         &mut component_id: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world
             .get_non_send_with_ticks(component_id)
             .map(|(ptr, ticks)| NonSendMut {
                 value: ptr.assert_unique().deref_mut(),
-                ticks: TicksMut::from_tick_cells(ticks, system_meta.last_run, change_tick),
+                ticks: TicksMut::from_tick_cells(ticks, last_run, system_meta.this_run),
             })
     }
 }
@@ -1267,9 +1267,9 @@ unsafe impl<'a> SystemParam for &'a Archetypes {
     #[inline]
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world.archetypes()
     }
@@ -1288,9 +1288,9 @@ unsafe impl<'a> SystemParam for &'a Components {
     #[inline]
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world.components()
     }
@@ -1309,9 +1309,9 @@ unsafe impl<'a> SystemParam for &'a Entities {
     #[inline]
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world.entities()
     }
@@ -1330,9 +1330,9 @@ unsafe impl<'a> SystemParam for &'a Bundles {
     #[inline]
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world.bundles()
     }
@@ -1341,7 +1341,7 @@ unsafe impl<'a> SystemParam for &'a Bundles {
 /// A [`SystemParam`] that reads the previous and current change ticks of the system.
 ///
 /// A system's change ticks are updated each time it runs:
-/// - `last_run` copies the previous value of `change_tick`
+/// - `last_run` copies the previous value of `this_run`
 /// - `this_run` copies the current value of [`World::read_change_tick`]
 ///
 /// Component change ticks that are more recent than `last_run` will be detected by the system.
@@ -1379,13 +1379,13 @@ unsafe impl SystemParam for SystemChangeTick {
 
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'s SystemMeta,
         _world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'w, 's> {
         SystemChangeTick {
-            last_run: system_meta.last_run,
-            this_run: change_tick,
+            last_run,
+            this_run: system_meta.this_run,
         }
     }
 }
@@ -1423,13 +1423,13 @@ macro_rules! impl_system_param_tuple {
             #[allow(clippy::unused_unit)]
             unsafe fn get_param<'w, 's>(
                 state: &'s mut Self::State,
-                _system_meta: &SystemMeta,
+                _system_meta: &'s SystemMeta,
                 _world: UnsafeWorldCell<'w>,
-                _change_tick: Tick,
+                _last_run: Tick,
             ) -> Self::Item<'w, 's> {
 
                 let ($($param,)*) = state;
-                ($($param::get_param($param, _system_meta, _world, _change_tick),)*)
+                ($($param::get_param($param, _system_meta, _world, _last_run),)*)
             }
         }
     };
@@ -1569,12 +1569,12 @@ unsafe impl<P: SystemParam + 'static> SystemParam for StaticSystemParam<'_, '_, 
 
     unsafe fn get_param<'world, 'state>(
         state: &'state mut Self::State,
-        system_meta: &SystemMeta,
+        system_meta: &'state SystemMeta,
         world: UnsafeWorldCell<'world>,
-        change_tick: Tick,
+        last_run: Tick,
     ) -> Self::Item<'world, 'state> {
         // SAFETY: Defer to the safety of P::SystemParam
-        StaticSystemParam(unsafe { P::get_param(state, system_meta, world, change_tick) })
+        StaticSystemParam(unsafe { P::get_param(state, system_meta, world, last_run) })
     }
 }
 
@@ -1587,9 +1587,9 @@ unsafe impl<T: ?Sized> SystemParam for PhantomData<T> {
 
     unsafe fn get_param<'world, 'state>(
         _state: &'state mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'state SystemMeta,
         _world: UnsafeWorldCell<'world>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'world, 'state> {
         PhantomData
     }

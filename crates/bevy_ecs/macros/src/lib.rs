@@ -189,7 +189,7 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 // Conflicting params in ParamSet are not accessible at the same time
                 // ParamSets are guaranteed to not conflict with other SystemParams
                 unsafe {
-                    #param::get_param(&mut self.param_states.#index, &self.system_meta, self.world, self.change_tick)
+                    #param::get_param(&mut self.param_states.#index, &self.system_meta, self.world, self.last_run)
                 }
             }
         });
@@ -251,15 +251,15 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 #[inline]
                 unsafe fn get_param<'w, 's>(
                     state: &'s mut Self::State,
-                    system_meta: &SystemMeta,
+                    system_meta: &'s SystemMeta,
                     world: UnsafeWorldCell<'w>,
-                    change_tick: Tick,
+                    last_run: Tick,
                 ) -> Self::Item<'w, 's> {
                     ParamSet {
                         param_states: state,
                         system_meta: system_meta.clone(),
                         world,
-                        change_tick,
+                        last_run,
                     }
                 }
             }
@@ -437,13 +437,13 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
 
                 unsafe fn get_param<'w, 's>(
                     state: &'s mut Self::State,
-                    system_meta: &#path::system::SystemMeta,
+                    system_meta: &'s #path::system::SystemMeta,
                     world: #path::world::unsafe_world_cell::UnsafeWorldCell<'w>,
-                    change_tick: #path::component::Tick,
+                    last_run: #path::component::Tick,
                 ) -> Self::Item<'w, 's> {
                     let (#(#tuple_patterns,)*) = <
                         (#(#tuple_types,)*) as #path::system::SystemParam
-                    >::get_param(&mut state.state, system_meta, world, change_tick);
+                    >::get_param(&mut state.state, system_meta, world, last_run);
                     #struct_name {
                         #(#fields: #field_locals,)*
                     }

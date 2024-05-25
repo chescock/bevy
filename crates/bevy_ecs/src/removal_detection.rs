@@ -261,9 +261,9 @@ unsafe impl<'a> SystemParam for &'a RemovedComponentEvents {
     #[inline]
     unsafe fn get_param<'w, 's>(
         _state: &'s mut Self::State,
-        _system_meta: &SystemMeta,
+        _system_meta: &'s SystemMeta,
         world: UnsafeWorldCell<'w>,
-        _change_tick: Tick,
+        _last_run: Tick,
     ) -> Self::Item<'w, 's> {
         world.removed_components()
     }
