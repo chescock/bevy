@@ -189,7 +189,7 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 // Conflicting params in ParamSet are not accessible at the same time
                 // ParamSets are guaranteed to not conflict with other SystemParams
                 unsafe {
-                    #param::get_param(&mut self.param_states.#index, &self.system_meta, self.world, self.last_run)
+                    #param::get_param(&mut self.param_states.#index, self.system_meta, self.world, self.last_run)
                 }
             }
         });
@@ -257,7 +257,7 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 ) -> Self::Item<'w, 's> {
                     ParamSet {
                         param_states: state,
-                        system_meta: system_meta.clone(),
+                        system_meta,
                         world,
                         last_run,
                     }

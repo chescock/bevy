@@ -409,7 +409,7 @@ fn assert_component_access_compatibility(
 pub struct ParamSet<'w, 's, T: SystemParam> {
     param_states: &'s mut T::State,
     world: UnsafeWorldCell<'w>,
-    system_meta: SystemMeta,
+    system_meta: &'s SystemMeta,
     last_run: Tick,
 }
 

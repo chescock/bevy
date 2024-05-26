@@ -2,7 +2,6 @@ use crate::component::Tick;
 use crate::prelude::World;
 use crate::system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemMeta, SystemParam};
 use crate::world::unsafe_world_cell::UnsafeWorldCell;
-use std::borrow::Cow;
 use std::ops::Deref;
 
 /// [`SystemParam`] that returns the name of the system which it is used in.
@@ -69,21 +68,19 @@ impl<'s> std::fmt::Display for SystemName<'s> {
 
 // SAFETY: no component value access
 unsafe impl SystemParam for SystemName<'_> {
-    type State = Cow<'static, str>;
+    type State = ();
     type Item<'w, 's> = SystemName<'s>;
 
-    fn init_state(_world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        system_meta.name.clone()
-    }
+    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
-        name: &'s mut Self::State,
-        _system_meta: &'s SystemMeta,
+        _state: &'s mut Self::State,
+        system_meta: &'s SystemMeta,
         _world: UnsafeWorldCell<'w>,
         _last_run: Tick,
     ) -> Self::Item<'w, 's> {
-        SystemName(name)
+        SystemName(&system_meta.name)
     }
 }
 
@@ -91,15 +88,13 @@ unsafe impl SystemParam for SystemName<'_> {
 unsafe impl<'s> ReadOnlySystemParam for SystemName<'s> {}
 
 impl ExclusiveSystemParam for SystemName<'_> {
-    type State = Cow<'static, str>;
+    type State = ();
     type Item<'s> = SystemName<'s>;
 
-    fn init(_world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        system_meta.name.clone()
-    }
+    fn init(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
 
-    fn get_param<'s>(state: &'s mut Self::State, _system_meta: &'s SystemMeta) -> Self::Item<'s> {
-        SystemName(state)
+    fn get_param<'s>(_state: &'s mut Self::State, system_meta: &'s SystemMeta) -> Self::Item<'s> {
+        SystemName(&system_meta.name)
     }
 }
 
