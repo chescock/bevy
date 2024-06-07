@@ -427,6 +427,21 @@ mod tests {
     }
 
     #[test]
+    fn multi_param_builder_inference() {
+        let mut world = World::new();
+
+        world.spawn(A);
+        world.spawn_empty();
+
+        let system = (LocalBuilder(0u64), ParamBuilder::local::<u64>())
+            .build_state(&mut world)
+            .build_system(|a, b| *a + *b + 1);
+
+        let result = world.run_system_once(system);
+        assert_eq!(result, 1);
+    }
+
+    #[test]
     fn param_set_builder() {
         let mut world = World::new();
 
@@ -497,7 +512,7 @@ mod tests {
             DynParamBuilder::new::<&Entities>(ParamBuilder),
         ],)
             .build_state(&mut world)
-            .build_system(|mut params: Vec<DynSystemParam>| {
+            .build_system(|mut params| {
                 let local = *params[0].downcast_mut::<Local<usize>>().unwrap();
                 let query_count = params[1]
                     .downcast_mut::<Query<()>>()
