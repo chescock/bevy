@@ -4,7 +4,9 @@ use crate::{
     prelude::QueryBuilder,
     query::{QueryData, QueryFilter, QueryState},
     system::{
-        system_param::{DynSystemParam, DynSystemParamState, Local, ParamSet, SystemParam},
+        system_param::{
+            DynSystemParam, DynSystemParamState, Local, ParamSet, StaticSystemParam, SystemParam,
+        },
         Query, SystemMeta,
     },
     world::{FromWorld, World},
@@ -293,6 +295,20 @@ unsafe impl<'s, T: FromWorld + Send + 'static> SystemParamBuilder<Local<'s, T>>
         _meta: &mut SystemMeta,
     ) -> <Local<'s, T> as SystemParam>::State {
         SyncCell::new(self.0)
+    }
+}
+
+pub struct StaticSystemParamBuilder<T>(pub T);
+
+unsafe impl<'w, 's, P: SystemParam + 'static, B: SystemParamBuilder<P>>
+    SystemParamBuilder<StaticSystemParam<'w, 's, P>> for StaticSystemParamBuilder<B>
+{
+    fn build(
+        self,
+        world: &mut World,
+        meta: &mut SystemMeta,
+    ) -> <StaticSystemParam<'w, 's, P> as SystemParam>::State {
+        self.0.build(world, meta)
     }
 }
 
