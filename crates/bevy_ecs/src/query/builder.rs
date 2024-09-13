@@ -123,6 +123,18 @@ impl<'w, D: QueryData, F: QueryFilter> QueryBuilder<'w, D, F> {
         self
     }
 
+    /// Adds accesses required to read any component to self.
+    pub fn read_all_components(&mut self) -> &mut Self {
+        self.access.read_all_components();
+        self
+    }
+
+    /// Adds accesses required to read or write any component to self.
+    pub fn write_all_components(&mut self) -> &mut Self {
+        self.access.write_all_components();
+        self
+    }
+
     /// Adds filter from `T` to self.
     pub fn filter<T: QueryFilter>(&mut self) -> &mut Self {
         let state = T::init_state(self.world);

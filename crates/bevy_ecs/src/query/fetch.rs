@@ -626,27 +626,15 @@ unsafe impl<'a> WorldQuery for FilteredEntityRef<'a> {
     unsafe fn set_archetype<'w>(
         fetch: &mut Self::Fetch<'w>,
         state: &Self::State,
-        archetype: &'w Archetype,
+        _archetype: &'w Archetype,
         _table: &Table,
     ) {
-        let mut access = Access::default();
-        state.access.component_reads().for_each(|id| {
-            if archetype.contains(id) {
-                access.add_component_read(id);
-            }
-        });
-        fetch.1 = access;
+        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
-    unsafe fn set_table<'w>(fetch: &mut Self::Fetch<'w>, state: &Self::State, table: &'w Table) {
-        let mut access = Access::default();
-        state.access.component_reads().for_each(|id| {
-            if table.has_column(id) {
-                access.add_component_read(id);
-            }
-        });
-        fetch.1 = access;
+    unsafe fn set_table<'w>(fetch: &mut Self::Fetch<'w>, state: &Self::State, _table: &'w Table) {
+        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
@@ -733,37 +721,15 @@ unsafe impl<'a> WorldQuery for FilteredEntityMut<'a> {
     unsafe fn set_archetype<'w>(
         fetch: &mut Self::Fetch<'w>,
         state: &Self::State,
-        archetype: &'w Archetype,
+        _archetype: &'w Archetype,
         _table: &Table,
     ) {
-        let mut access = Access::default();
-        state.access.component_reads().for_each(|id| {
-            if archetype.contains(id) {
-                access.add_component_read(id);
-            }
-        });
-        state.access.component_writes().for_each(|id| {
-            if archetype.contains(id) {
-                access.add_component_write(id);
-            }
-        });
-        fetch.1 = access;
+        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
-    unsafe fn set_table<'w>(fetch: &mut Self::Fetch<'w>, state: &Self::State, table: &'w Table) {
-        let mut access = Access::default();
-        state.access.component_reads().for_each(|id| {
-            if table.has_column(id) {
-                access.add_component_read(id);
-            }
-        });
-        state.access.component_writes().for_each(|id| {
-            if table.has_column(id) {
-                access.add_component_write(id);
-            }
-        });
-        fetch.1 = access;
+    unsafe fn set_table<'w>(fetch: &mut Self::Fetch<'w>, state: &Self::State, _table: &'w Table) {
+        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
