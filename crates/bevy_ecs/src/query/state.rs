@@ -508,22 +508,40 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         archetype: &Archetype,
         access: &mut Access<ArchetypeComponentId>,
     ) {
-        self.component_access
-            .access
-            .component_reads()
-            .for_each(|id| {
-                if let Some(id) = archetype.get_archetype_component_id(id) {
+        if self.component_access.access.has_read_all_components() {
+            // If the query reads or writes all components, then `component_reads()` and `component_writes()` may be empty.
+            // Instead, we get the list of components to read from the archetype.
+            // If the query writes all components, `has_read_all_components()` will also return true,
+            // and `has_component_write()` will return true for each component, so that doesn't require a special case.
+            for (component_id, id) in archetype.components_with_archetype_component_id() {
+                if self
+                    .component_access
+                    .access
+                    .has_component_write(component_id)
+                {
+                    access.add_component_write(id);
+                } else {
                     access.add_component_read(id);
                 }
-            });
-        self.component_access
-            .access
-            .component_writes()
-            .for_each(|id| {
-                if let Some(id) = archetype.get_archetype_component_id(id) {
-                    access.add_component_write(id);
-                }
-            });
+            }
+        } else {
+            self.component_access
+                .access
+                .component_reads()
+                .for_each(|id| {
+                    if let Some(id) = archetype.get_archetype_component_id(id) {
+                        access.add_component_read(id);
+                    }
+                });
+            self.component_access
+                .access
+                .component_writes()
+                .for_each(|id| {
+                    if let Some(id) = archetype.get_archetype_component_id(id) {
+                        access.add_component_write(id);
+                    }
+                });
+        }
     }
 
     /// Use this to transform a [`QueryState`] into a more generic [`QueryState`].
@@ -1731,7 +1749,8 @@ impl<D: QueryData, F: QueryFilter> From<QueryBuilder<'_, D, F>> for QueryState<D
 #[cfg(test)]
 mod tests {
     use crate as bevy_ecs;
-    use crate::world::FilteredEntityRef;
+    use crate::query::{Access, FilteredAccess};
+    use crate::world::{FilteredEntityMut, FilteredEntityRef};
     use crate::{component::Component, prelude::*, query::QueryEntityError};
 
     #[test]
@@ -2163,5 +2182,41 @@ mod tests {
         let query_1 = QueryState::<&A, Without<C>>::new(&mut world);
         let query_2 = QueryState::<&B, Without<C>>::new(&mut world);
         let _: QueryState<Entity, Changed<C>> = query_1.join_filtered(&world, &query_2);
+    }
+
+    #[test]
+    fn entity_ref_and_mut_report_archetype_component_id_access() {
+        // `update_archetype_component_access()` has special handling for queries that read or write all components.
+        let mut world = World::new();
+        let component_id = world.init_component::<A>();
+        let mut query_mut = QueryState::<EntityMut>::new(&mut world);
+        let mut query_ref = QueryState::<EntityRef>::new(&mut world);
+        let mut access = FilteredAccess::matches_everything();
+        access.read_all_components();
+        let mut builder = QueryBuilder::<FilteredEntityMut>::new(&mut world);
+        builder.extend_access(access);
+        let mut query_mixed = builder.data::<&mut A>().build();
+
+        let entity = world.spawn(A(0));
+        let archetype = entity.archetype();
+        let archetype_component_id = archetype.get_archetype_component_id(component_id).unwrap();
+
+        let mut access = Access::new();
+        // SAFETY: `archetype` is from `world` and `query_mut` was initialized from `world.
+        unsafe { query_mut.update_archetype_component_access(archetype, &mut access) };
+        assert!(access.has_component_read(archetype_component_id));
+        assert!(access.has_component_write(archetype_component_id));
+
+        let mut access = Access::new();
+        // SAFETY: `archetype` is from `world` and `query_ref` was initialized from `world.
+        unsafe { query_ref.update_archetype_component_access(archetype, &mut access) };
+        assert!(access.has_component_read(archetype_component_id));
+        assert!(!access.has_component_write(archetype_component_id));
+
+        let mut access = Access::new();
+        // SAFETY: `archetype` is from `world` and `query_ref` was initialized from `world.
+        unsafe { query_mixed.update_archetype_component_access(archetype, &mut access) };
+        assert!(access.has_component_read(archetype_component_id));
+        assert!(access.has_component_write(archetype_component_id));
     }
 }

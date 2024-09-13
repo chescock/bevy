@@ -493,6 +493,18 @@ impl Archetype {
         self.components.indices()
     }
 
+    /// Gets an iterator of all of the components in the archetype along with their [`ArchetypeComponentId`].
+    ///
+    /// All of the IDs are unique.
+    #[inline]
+    pub(crate) fn components_with_archetype_component_id(
+        &self,
+    ) -> impl Iterator<Item = (ComponentId, ArchetypeComponentId)> + '_ {
+        self.components
+            .iter()
+            .map(|(component_id, info)| (*component_id, info.archetype_component_id))
+    }
+
     /// Returns the total number of components in the archetype
     #[inline]
     pub fn component_count(&self) -> usize {
