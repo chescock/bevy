@@ -2070,6 +2070,22 @@ impl<'a, 's> From<&'a FilteredEntityMut<'_, 's>> for FilteredEntityRef<'a, 's> {
     }
 }
 
+impl<'w, 's, B: Bundle> From<EntityRefExcept<'w, 's, B>> for FilteredEntityRef<'w, 's> {
+    fn from(entity_ref: EntityRefExcept<'w, 's, B>) -> Self {
+        // SAFETY:
+        // - `EntityRefExcept` guarantees shared access to all components in the new `FilteredEntityRef`.
+        unsafe { FilteredEntityRef::new(entity_ref.entity, entity_ref.access) }
+    }
+}
+
+impl<'w, 's, B: Bundle> From<EntityMutExcept<'w, 's, B>> for FilteredEntityRef<'w, 's> {
+    fn from(entity_ref: EntityMutExcept<'w, 's, B>) -> Self {
+        // SAFETY:
+        // - `EntityMutExcept` guarantees exclusive access to all components in the new `FilteredEntityRef`.
+        unsafe { FilteredEntityRef::new(entity_ref.entity, entity_ref.access) }
+    }
+}
+
 fn read_all_components() -> &'static Access<ComponentId> {
     static READ_ALL_COMPONENTS: OnceLock<Access<ComponentId>> = OnceLock::new();
 
@@ -2320,6 +2336,14 @@ impl<'w, 's> FilteredEntityMut<'w, 's> {
     }
 }
 
+impl<'w, 's, B: Bundle> From<EntityMutExcept<'w, 's, B>> for FilteredEntityMut<'w, 's> {
+    fn from(entity_ref: EntityMutExcept<'w, 's, B>) -> Self {
+        // SAFETY:
+        // - `EntityMutExcept` guarantees exclusive access to all components in the new `FilteredEntityMut`.
+        unsafe { FilteredEntityMut::new(entity_ref.entity, entity_ref.access) }
+    }
+}
+
 fn write_all_components() -> &'static Access<ComponentId> {
     static WRITE_ALL_COMPONENTS: OnceLock<Access<ComponentId>> = OnceLock::new();
 
@@ -2374,23 +2398,28 @@ pub enum TryFromFilteredError {
 /// Provides read-only access to a single entity and all its components, save
 /// for an explicitly-enumerated set.
 #[derive(Clone)]
-pub struct EntityRefExcept<'w, B>
+pub struct EntityRefExcept<'w, 's, B>
 where
     B: Bundle,
 {
     entity: UnsafeEntityCell<'w>,
+    access: &'s Access<ComponentId>,
     phantom: PhantomData<B>,
 }
 
-impl<'w, B> EntityRefExcept<'w, B>
+impl<'w, 's, B> EntityRefExcept<'w, 's, B>
 where
     B: Bundle,
 {
     /// # Safety
     /// Other users of `UnsafeEntityCell` must only have mutable access to the components in `B`.
-    pub(crate) unsafe fn new(entity: UnsafeEntityCell<'w>) -> Self {
+    pub(crate) unsafe fn new(
+        entity: UnsafeEntityCell<'w>,
+        access: &'s Access<ComponentId>,
+    ) -> Self {
         Self {
             entity,
+            access,
             phantom: PhantomData,
         }
     }
@@ -2412,7 +2441,7 @@ where
     {
         let components = self.entity.world().components();
         let id = components.component_id::<C>()?;
-        if bundle_contains_component::<B>(components, id) {
+        if !self.access.has_component_read(id) {
             None
         } else {
             // SAFETY: We have read access for all components that weren't
@@ -2432,7 +2461,7 @@ where
     {
         let components = self.entity.world().components();
         let id = components.component_id::<C>()?;
-        if bundle_contains_component::<B>(components, id) {
+        if !self.access.has_component_read(id) {
             None
         } else {
             // SAFETY: We have read access for all components that weren't
@@ -2442,14 +2471,14 @@ where
     }
 }
 
-impl<'a, B> From<&'a EntityMutExcept<'_, B>> for EntityRefExcept<'a, B>
+impl<'a, 's, B> From<&'a EntityMutExcept<'_, 's, B>> for EntityRefExcept<'a, 's, B>
 where
     B: Bundle,
 {
-    fn from(entity_mut: &'a EntityMutExcept<'_, B>) -> Self {
+    fn from(entity_mut: &'a EntityMutExcept<'_, 's, B>) -> Self {
         // SAFETY: All accesses that `EntityRefExcept` provides are also
         // accesses that `EntityMutExcept` provides.
-        unsafe { EntityRefExcept::new(entity_mut.entity) }
+        unsafe { EntityRefExcept::new(entity_mut.entity, entity_mut.access) }
     }
 }
 
@@ -2462,23 +2491,28 @@ where
 /// need access to all components, prefer a standard query with a
 /// [`crate::query::Without`] filter.
 #[derive(Clone)]
-pub struct EntityMutExcept<'w, B>
+pub struct EntityMutExcept<'w, 's, B>
 where
     B: Bundle,
 {
     entity: UnsafeEntityCell<'w>,
+    access: &'s Access<ComponentId>,
     phantom: PhantomData<B>,
 }
 
-impl<'w, B> EntityMutExcept<'w, B>
+impl<'w, 's, B> EntityMutExcept<'w, 's, B>
 where
     B: Bundle,
 {
     /// # Safety
     /// Other users of `UnsafeEntityCell` must not have access to any components not in `B`.
-    pub(crate) unsafe fn new(entity: UnsafeEntityCell<'w>) -> Self {
+    pub(crate) unsafe fn new(
+        entity: UnsafeEntityCell<'w>,
+        access: &'s Access<ComponentId>,
+    ) -> Self {
         Self {
             entity,
+            access,
             phantom: PhantomData,
         }
     }
@@ -2494,16 +2528,16 @@ where
     ///
     /// This is useful if you have `&mut EntityMutExcept`, but you need
     /// `EntityMutExcept`.
-    pub fn reborrow(&mut self) -> EntityMutExcept<'_, B> {
+    pub fn reborrow(&mut self) -> EntityMutExcept<'_, 's, B> {
         // SAFETY: We have exclusive access to the entire entity and the
         // applicable components.
-        unsafe { Self::new(self.entity) }
+        unsafe { Self::new(self.entity, self.access) }
     }
 
     /// Gets read-only access to all of the entity's components, except for the
     /// ones in `CL`.
     #[inline]
-    pub fn as_readonly(&self) -> EntityRefExcept<'_, B> {
+    pub fn as_readonly(&self) -> EntityRefExcept<'_, 's, B> {
         EntityRefExcept::from(self)
     }
 
@@ -2540,7 +2574,7 @@ where
     {
         let components = self.entity.world().components();
         let id = components.component_id::<C>()?;
-        if bundle_contains_component::<B>(components, id) {
+        if !self.access.has_component_write(id) {
             None
         } else {
             // SAFETY: We have write access for all components that weren't
@@ -2548,19 +2582,6 @@ where
             unsafe { self.entity.get_mut() }
         }
     }
-}
-
-fn bundle_contains_component<B>(components: &Components, query_id: ComponentId) -> bool
-where
-    B: Bundle,
-{
-    let mut found = false;
-    B::get_component_ids(components, &mut |maybe_id| {
-        if let Some(id) = maybe_id {
-            found = found || id == query_id;
-        }
-    });
-    found
 }
 
 /// Inserts a dynamic [`Bundle`] into the entity.
