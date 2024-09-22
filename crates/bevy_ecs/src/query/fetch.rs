@@ -661,10 +661,10 @@ impl ReleaseStateQueryData for EntityMut<'_> {
 }
 
 /// SAFETY: The accesses of `Self::ReadOnly` are a subset of the accesses of `Self`
-unsafe impl<'a> WorldQuery for FilteredEntityRef<'a> {
-    type Fetch<'w, 's> = (UnsafeWorldCell<'w>, Access<ComponentId>);
-    type Item<'w, 's> = FilteredEntityRef<'w>;
-    type State = FilteredAccess<ComponentId>;
+unsafe impl WorldQuery for FilteredEntityRef<'_, '_> {
+    type Fetch<'w, 's> = (UnsafeWorldCell<'w>, &'s Access<ComponentId>);
+    type Item<'w, 's> = FilteredEntityRef<'w, 's>;
+    type State = Access<ComponentId>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
@@ -682,38 +682,34 @@ unsafe impl<'a> WorldQuery for FilteredEntityRef<'a> {
 
     unsafe fn init_fetch<'w, 's>(
         world: UnsafeWorldCell<'w>,
-        _state: &'s Self::State,
+        state: &'s Self::State,
         _last_run: Tick,
         _this_run: Tick,
     ) -> Self::Fetch<'w, 's> {
-        let mut access = Access::default();
-        access.read_all_components();
-        (world, access)
+        (world, state)
     }
 
     #[inline]
     unsafe fn set_archetype<'w, 's>(
-        fetch: &mut Self::Fetch<'w, 's>,
-        state: &'s Self::State,
+        _fetch: &mut Self::Fetch<'w, 's>,
+        _state: &'s Self::State,
         _: &'w Archetype,
         _table: &Table,
     ) {
-        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
     unsafe fn set_table<'w, 's>(
-        fetch: &mut Self::Fetch<'w, 's>,
-        state: &'s Self::State,
+        _fetch: &mut Self::Fetch<'w, 's>,
+        _state: &'s Self::State,
         _: &'w Table,
     ) {
-        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
     fn set_access<'w>(state: &mut Self::State, access: &FilteredAccess<ComponentId>) {
-        state.clone_from(access);
-        state.access_mut().clear_writes();
+        state.clone_from(&access.access);
+        state.clear_writes();
     }
 
     #[inline(always)]
@@ -725,7 +721,7 @@ unsafe impl<'a> WorldQuery for FilteredEntityRef<'a> {
         // SAFETY: `fetch` must be called with an entity that exists in the world
         let cell = unsafe { world.get_entity(entity).debug_checked_unwrap() };
         // SAFETY: mutable access to every component has been registered.
-        unsafe { FilteredEntityRef::new(cell, access.clone()) }
+        unsafe { FilteredEntityRef::new(cell, access) }
     }
 
     fn update_component_access(
@@ -733,18 +729,18 @@ unsafe impl<'a> WorldQuery for FilteredEntityRef<'a> {
         filtered_access: &mut FilteredAccess<ComponentId>,
     ) {
         assert!(
-            filtered_access.access().is_compatible(&state.access),
+            filtered_access.access().is_compatible(state),
             "FilteredEntityRef conflicts with a previous access in this query. Exclusive access cannot coincide with any other accesses.",
         );
-        filtered_access.access.extend(&state.access);
+        filtered_access.access.extend(state);
     }
 
     fn init_state(_world: &mut World) -> Self::State {
-        FilteredAccess::default()
+        Access::default()
     }
 
     fn get_state(_components: &Components) -> Option<Self::State> {
-        Some(FilteredAccess::default())
+        Some(Access::default())
     }
 
     fn matches_component_set(
@@ -756,18 +752,18 @@ unsafe impl<'a> WorldQuery for FilteredEntityRef<'a> {
 }
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
-unsafe impl<'a> QueryData for FilteredEntityRef<'a> {
+unsafe impl QueryData for FilteredEntityRef<'_, '_> {
     type ReadOnly = Self;
 }
 
 /// SAFETY: Access is read-only.
-unsafe impl ReadOnlyQueryData for FilteredEntityRef<'_> {}
+unsafe impl ReadOnlyQueryData for FilteredEntityRef<'_, '_> {}
 
 /// SAFETY: The accesses of `Self::ReadOnly` are a subset of the accesses of `Self`
-unsafe impl<'a> WorldQuery for FilteredEntityMut<'a> {
-    type Fetch<'w, 's> = (UnsafeWorldCell<'w>, Access<ComponentId>);
-    type Item<'w, 's> = FilteredEntityMut<'w>;
-    type State = FilteredAccess<ComponentId>;
+unsafe impl WorldQuery for FilteredEntityMut<'_, '_> {
+    type Fetch<'w, 's> = (UnsafeWorldCell<'w>, &'s Access<ComponentId>);
+    type Item<'w, 's> = FilteredEntityMut<'w, 's>;
+    type State = Access<ComponentId>;
 
     fn shrink<'wlong: 'wshort, 'wshort, 's>(
         item: Self::Item<'wlong, 's>,
@@ -785,37 +781,33 @@ unsafe impl<'a> WorldQuery for FilteredEntityMut<'a> {
 
     unsafe fn init_fetch<'w, 's>(
         world: UnsafeWorldCell<'w>,
-        _state: &'s Self::State,
+        state: &'s Self::State,
         _last_run: Tick,
         _this_run: Tick,
     ) -> Self::Fetch<'w, 's> {
-        let mut access = Access::default();
-        access.write_all_components();
-        (world, access)
+        (world, state)
     }
 
     #[inline]
     unsafe fn set_archetype<'w, 's>(
-        fetch: &mut Self::Fetch<'w, 's>,
-        state: &'s Self::State,
+        _fetch: &mut Self::Fetch<'w, 's>,
+        _state: &'s Self::State,
         _: &'w Archetype,
         _table: &Table,
     ) {
-        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
     unsafe fn set_table<'w, 's>(
-        fetch: &mut Self::Fetch<'w, 's>,
-        state: &'s Self::State,
+        _fetch: &mut Self::Fetch<'w, 's>,
+        _state: &'s Self::State,
         _: &'w Table,
     ) {
-        fetch.1.clone_from(&state.access);
     }
 
     #[inline]
     fn set_access<'w>(state: &mut Self::State, access: &FilteredAccess<ComponentId>) {
-        state.clone_from(access);
+        state.clone_from(&access.access);
     }
 
     #[inline(always)]
@@ -827,7 +819,7 @@ unsafe impl<'a> WorldQuery for FilteredEntityMut<'a> {
         // SAFETY: `fetch` must be called with an entity that exists in the world
         let cell = unsafe { world.get_entity(entity).debug_checked_unwrap() };
         // SAFETY: mutable access to every component has been registered.
-        unsafe { FilteredEntityMut::new(cell, access.clone()) }
+        unsafe { FilteredEntityMut::new(cell, access) }
     }
 
     fn update_component_access(
@@ -835,18 +827,18 @@ unsafe impl<'a> WorldQuery for FilteredEntityMut<'a> {
         filtered_access: &mut FilteredAccess<ComponentId>,
     ) {
         assert!(
-            filtered_access.access().is_compatible(&state.access),
+            filtered_access.access().is_compatible(state),
             "FilteredEntityMut conflicts with a previous access in this query. Exclusive access cannot coincide with any other accesses.",
         );
-        filtered_access.access.extend(&state.access);
+        filtered_access.access.extend(state);
     }
 
     fn init_state(_world: &mut World) -> Self::State {
-        FilteredAccess::default()
+        Access::default()
     }
 
     fn get_state(_components: &Components) -> Option<Self::State> {
-        Some(FilteredAccess::default())
+        Some(Access::default())
     }
 
     fn matches_component_set(
@@ -858,8 +850,8 @@ unsafe impl<'a> WorldQuery for FilteredEntityMut<'a> {
 }
 
 /// SAFETY: access of `FilteredEntityRef` is a subset of `FilteredEntityMut`
-unsafe impl<'a> QueryData for FilteredEntityMut<'a> {
-    type ReadOnly = FilteredEntityRef<'a>;
+unsafe impl<'w, 's> QueryData for FilteredEntityMut<'w, 's> {
+    type ReadOnly = FilteredEntityRef<'w, 's>;
 }
 
 /// SAFETY: `EntityRefExcept` guards access to all components in the bundle `B`
