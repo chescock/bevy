@@ -16,7 +16,6 @@ use core::{
 };
 
 use super::{QueryData, QueryFilter, ReadOnlyQueryData};
-use alloc::vec::IntoIter;
 
 /// An [`Iterator`] over query results of a [`Query`](crate::system::Query).
 ///
@@ -1453,8 +1452,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
     /// #   let entity_list: Vec<Entity> = Vec::new();
     ///     // We need to collect the internal iterator before iterating mutably
     ///     let mut parent_query_iter = query.iter_many_mut(entity_list)
-    ///         .sort::<Entity>()
-    ///         .collect_inner();
+    ///         .sort::<Entity>();
     ///     
     ///     let mut scratch_value = 0;
     ///     while let Some(mut part_value) = parent_query_iter.fetch_next_back()
@@ -1497,10 +1495,20 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
             )
         };
         let mut keyed_query: Vec<_> = query_lens
-            .map(|(key, entity)| (key, NeutralOrd(entity)))
+            .map(|(key, entity)| (MaybeUninit::new(key), entity))
             .collect();
-        keyed_query.sort();
-        let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity.0);
+        keyed_query.sort_by(|(key_1, _), (key_2, _)| {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_1 = unsafe { key_1.assume_init_ref() };
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_2 = unsafe { key_2.assume_init_ref() };
+            key_1.cmp(key_2)
+        });
+        for (item, _) in &mut keyed_query {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            unsafe { item.assume_init_drop() };
+        }
+        let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity);
         // SAFETY:
         // `self.world` has permission to access the required components.
         // Each lens query item is dropped before the respective actual query item is accessed.
@@ -1586,10 +1594,20 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
             )
         };
         let mut keyed_query: Vec<_> = query_lens
-            .map(|(key, entity)| (key, NeutralOrd(entity)))
+            .map(|(key, entity)| (MaybeUninit::new(key), entity))
             .collect();
-        keyed_query.sort_unstable();
-        let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity.0);
+        keyed_query.sort_unstable_by(|(key_1, _), (key_2, _)| {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_1 = unsafe { key_1.assume_init_ref() };
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_2 = unsafe { key_2.assume_init_ref() };
+            key_1.cmp(key_2)
+        });
+        for (item, _) in &mut keyed_query {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            unsafe { item.assume_init_drop() };
+        }
+        let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity);
         // SAFETY:
         // `self.world` has permission to access the required components.
         // Each lens query item is dropped before the respective actual query item is accessed.
@@ -1679,8 +1697,20 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
                 world.change_tick(),
             )
         };
-        let mut keyed_query: Vec<_> = query_lens.collect();
-        keyed_query.sort_by(|(key_1, _), (key_2, _)| compare(key_1, key_2));
+        let mut keyed_query: Vec<_> = query_lens
+            .map(|(key, entity)| (MaybeUninit::new(key), entity))
+            .collect();
+        keyed_query.sort_by(|(key_1, _), (key_2, _)| {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_1 = unsafe { key_1.assume_init_ref() };
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_2 = unsafe { key_2.assume_init_ref() };
+            compare(key_1, key_2)
+        });
+        for (item, _) in &mut keyed_query {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            unsafe { item.assume_init_drop() };
+        }
         let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity);
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -1737,8 +1767,20 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
                 world.change_tick(),
             )
         };
-        let mut keyed_query: Vec<_> = query_lens.collect();
-        keyed_query.sort_by(|(key_1, _), (key_2, _)| compare(key_1, key_2));
+        let mut keyed_query: Vec<_> = query_lens
+            .map(|(key, entity)| (MaybeUninit::new(key), entity))
+            .collect();
+        keyed_query.sort_unstable_by(|(key_1, _), (key_2, _)| {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_1 = unsafe { key_1.assume_init_ref() };
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let key_2 = unsafe { key_2.assume_init_ref() };
+            compare(key_1, key_2)
+        });
+        for (item, _) in &mut keyed_query {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            unsafe { item.assume_init_drop() };
+        }
         let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity);
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -1861,8 +1903,18 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
                 world.change_tick(),
             )
         };
-        let mut keyed_query: Vec<_> = query_lens.collect();
-        keyed_query.sort_by_key(|(lens, _)| f(lens));
+        let mut keyed_query: Vec<_> = query_lens
+            .map(|(key, entity)| (MaybeUninit::new(key), entity))
+            .collect();
+        keyed_query.sort_by_key(|(lens, _)| {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let lens = unsafe { lens.assume_init_ref() };
+            f(lens)
+        });
+        for (item, _) in &mut keyed_query {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            unsafe { item.assume_init_drop() };
+        }
         let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity);
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -1922,8 +1974,18 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: Borrow<Entity>>>
                 world.change_tick(),
             )
         };
-        let mut keyed_query: Vec<_> = query_lens.collect();
-        keyed_query.sort_unstable_by_key(|(lens, _)| f(lens));
+        let mut keyed_query: Vec<_> = query_lens
+            .map(|(key, entity)| (MaybeUninit::new(key), entity))
+            .collect();
+        keyed_query.sort_unstable_by_key(|(lens, _)| {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            let lens = unsafe { lens.assume_init_ref() };
+            f(lens)
+        });
+        for (item, _) in &mut keyed_query {
+            // SAFETY: The item was originally initialized, and has never been dropped
+            unsafe { item.assume_init_drop() };
+        }
         let entity_iter = keyed_query.into_iter().map(|(.., entity)| entity);
         // SAFETY:
         // `self.world` has permission to access the required components.
@@ -2178,25 +2240,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item = Entity>>
         unsafe { D::fetch(&mut self.fetch, entity, location.table_row) }
     }
 
-    /// Collects the internal [`I`](QuerySortedManyIter) once.
-    /// [`fetch_next`](QuerySortedManyIter) and [`fetch_next_back`](QuerySortedManyIter) require this to be called first.
-    #[inline(always)]
-    pub fn collect_inner(self) -> QuerySortedManyIter<'w, 's, D, F, IntoIter<Entity>> {
-        QuerySortedManyIter {
-            entity_iter: self.entity_iter.collect::<Vec<_>>().into_iter(),
-            entities: self.entities,
-            tables: self.tables,
-            archetypes: self.archetypes,
-            fetch: self.fetch,
-            query_state: self.query_state,
-        }
-    }
-}
-
-impl<'w, 's, D: QueryData, F: QueryFilter> QuerySortedManyIter<'w, 's, D, F, IntoIter<Entity>> {
     /// Get next result from the query
-    /// [`collect_inner`](QuerySortedManyIter) needs to be called before this method becomes available.
-    /// This is done to prevent mutable aliasing.
     #[inline(always)]
     pub fn fetch_next(&mut self) -> Option<D::Item<'_>> {
         let entity = self.entity_iter.next()?;
@@ -2210,10 +2254,12 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QuerySortedManyIter<'w, 's, D, F, Int
         // `entity` is passed from `entity_iter` the first time.
         unsafe { D::shrink(self.fetch_next_aliased_unchecked(entity)).into() }
     }
+}
 
+impl<'w, 's, D: QueryData, F: QueryFilter, I: DoubleEndedIterator<Item = Entity>>
+    QuerySortedManyIter<'w, 's, D, F, I>
+{
     /// Get next result from the query
-    /// [`collect_inner`](QuerySortedManyIter) needs to be called before this method becomes available.
-    /// This is done to prevent mutable aliasing.
     #[inline(always)]
     pub fn fetch_next_back(&mut self) -> Option<D::Item<'_>> {
         let entity = self.entity_iter.next_back()?;
@@ -3090,5 +3136,52 @@ mod tests {
         _ = iter_2.fetch_next();
 
         iter_2.sort::<Entity>();
+    }
+
+    // This test should be run with miri to check for UB caused by aliasing.
+    // The lens items created during the sort must not be live at the same time as the mutable references returned from the iterator.
+    #[test]
+    fn query_iter_many_sorts_duplicate_entities_no_ub() {
+        #[derive(Component, Ord, PartialOrd, Eq, PartialEq)]
+        struct C(usize);
+
+        let mut world = World::new();
+        let id = world.spawn(C(10)).id();
+        let mut query_state = world.query::<&mut C>();
+
+        {
+            let mut query = query_state.iter_many_mut(&mut world, [id, id]).sort::<&C>();
+            while let Some(_) = query.fetch_next() {}
+        }
+        {
+            let mut query = query_state
+                .iter_many_mut(&mut world, [id, id])
+                .sort_unstable::<&C>();
+            while let Some(_) = query.fetch_next() {}
+        }
+        {
+            let mut query = query_state
+                .iter_many_mut(&mut world, [id, id])
+                .sort_by::<&C>(|d1, d2| d1.cmp(d2));
+            while let Some(_) = query.fetch_next() {}
+        }
+        {
+            let mut query = query_state
+                .iter_many_mut(&mut world, [id, id])
+                .sort_unstable_by::<&C>(|d1, d2| d1.cmp(d2));
+            while let Some(_) = query.fetch_next() {}
+        }
+        {
+            let mut query = query_state
+                .iter_many_mut(&mut world, [id, id])
+                .sort_by_key::<&C, _>(|d| d.0);
+            while let Some(_) = query.fetch_next() {}
+        }
+        {
+            let mut query = query_state
+                .iter_many_mut(&mut world, [id, id])
+                .sort_unstable_by_key::<&C, _>(|d| d.0);
+            while let Some(_) = query.fetch_next() {}
+        }
     }
 }
