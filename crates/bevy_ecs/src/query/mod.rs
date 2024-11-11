@@ -108,7 +108,9 @@ mod tests {
     use crate::{
         archetype::Archetype,
         component::{Component, ComponentId, Components, Tick},
-        prelude::{AnyOf, Changed, Entity, Or, QueryState, Resource, With, Without},
+        prelude::{
+            Added, AnyOf, Changed, Entity, EntityMut, Or, QueryState, Resource, With, Without,
+        },
         query::{
             ArchetypeFilter, FilteredAccess, Has, QueryCombinationIter, QueryData,
             ReadOnlyQueryData, WorldQuery,
@@ -904,5 +906,107 @@ mod tests {
     fn read_res_read_res_no_conflict() {
         fn system(_q1: Query<ReadsRData, With<A>>, _q2: Query<ReadsRData, Without<A>>) {}
         assert_is_system(system);
+    }
+
+    #[test]
+    fn transmuted_dense_queries_handle_optional_sparse_components() {
+        let mut world = World::new();
+        world.register_component::<Sparse>();
+        world.register_component::<A>();
+
+        // TODO: Explain this
+        // `EntityMut` performs dense iteration, and transmuting it preserves that.
+        // Queries that only perform optional access to sparse components may be transmuted to, but would normally perform sparse iteration
+        let mut option_sparse = world
+            .query::<EntityMut>()
+            .transmute::<Option<&Sparse>>(&world);
+        let mut option_sparse_a = world
+            .query::<EntityMut>()
+            .transmute::<Option<(&Sparse, &A)>>(&world);
+        let mut has_sparse = world.query::<EntityMut>().transmute::<Has<Sparse>>(&world);
+        let mut anyof_sparse_a = world
+            .query::<EntityMut>()
+            .transmute::<AnyOf<(&Sparse, &A)>>(&world);
+        let mut or_added_sparse_with_a = world
+            .query::<EntityMut>()
+            .transmute_filtered::<Entity, Or<(Added<Sparse>, With<A>)>>(&world);
+
+        world.clear_trackers();
+        let id = world.spawn(Sparse(0)).id();
+        assert!(matches!(
+            option_sparse.iter_mut(&mut world).next(),
+            Some(Some(Sparse(_)))
+        ));
+        assert!(matches!(
+            option_sparse_a.iter_mut(&mut world).next(),
+            Some(None)
+        ));
+        assert!(matches!(has_sparse.iter_mut(&mut world).next(), Some(true)));
+        assert!(matches!(
+            anyof_sparse_a.iter_mut(&mut world).next(),
+            Some((Some(Sparse(_)), None))
+        ));
+        assert!(or_added_sparse_with_a.iter_mut(&mut world).next().is_some());
+        world.despawn(id);
+
+        world.clear_trackers();
+        let id = world.spawn((Sparse(0), A(0))).id();
+        assert!(matches!(
+            option_sparse.iter_mut(&mut world).next(),
+            Some(Some(Sparse(_)))
+        ));
+        assert!(matches!(
+            option_sparse_a.iter_mut(&mut world).next(),
+            Some(Some((Sparse(_), A(_))))
+        ));
+        assert!(matches!(has_sparse.iter_mut(&mut world).next(), Some(true)));
+        assert!(matches!(
+            anyof_sparse_a.iter_mut(&mut world).next(),
+            Some((Some(Sparse(_)), Some(A(_))))
+        ));
+        assert!(or_added_sparse_with_a.iter_mut(&mut world).next().is_some());
+        world.despawn(id);
+
+        world.clear_trackers();
+        let id = world.spawn(()).id();
+        assert!(matches!(
+            option_sparse.iter_mut(&mut world).next(),
+            Some(None)
+        ));
+        assert!(matches!(
+            option_sparse_a.iter_mut(&mut world).next(),
+            Some(None)
+        ));
+        assert!(matches!(
+            has_sparse.iter_mut(&mut world).next(),
+            Some(false)
+        ));
+        assert!(matches!(
+            anyof_sparse_a.iter_mut(&mut world).next(),
+            Some((None, None))
+        ));
+        assert!(or_added_sparse_with_a.iter_mut(&mut world).next().is_none());
+        world.despawn(id);
+
+        world.clear_trackers();
+        let id = world.spawn(A(0)).id();
+        assert!(matches!(
+            option_sparse.iter_mut(&mut world).next(),
+            Some(None)
+        ));
+        assert!(matches!(
+            option_sparse_a.iter_mut(&mut world).next(),
+            Some(None)
+        ));
+        assert!(matches!(
+            has_sparse.iter_mut(&mut world).next(),
+            Some(false)
+        ));
+        assert!(matches!(
+            anyof_sparse_a.iter_mut(&mut world).next(),
+            Some((None, Some(A(_))))
+        ));
+        assert!(or_added_sparse_with_a.iter_mut(&mut world).next().is_some());
+        world.despawn(id);
     }
 }

@@ -353,6 +353,13 @@ mod render_entities_world_query_impls {
         ) -> bool {
             <&RenderEntity as WorldQuery>::matches_component_set(&state, set_contains_id)
         }
+
+        fn may_match_table(
+            state: &Self::State,
+            set_contains_id: &impl Fn(ComponentId) -> bool,
+        ) -> bool {
+            <&RenderEntity as WorldQuery>::may_match_table(state, set_contains_id)
+        }
     }
 
     // SAFETY: Component access of Self::ReadOnly is a subset of Self.
@@ -379,6 +386,18 @@ mod render_entities_world_query_impls {
             let component =
                 unsafe { <&RenderEntity as QueryData>::fetch(state, fetch, entity, table_row) };
             component.id()
+        }
+
+        unsafe fn try_fetch<'w, 's>(
+            state: &'s Self::State,
+            fetch: &mut Self::Fetch<'w>,
+            entity: Entity,
+            table_row: TableRow,
+        ) -> Option<Self::Item<'w, 's>> {
+            // SAFETY: defers to the `&T` implementation, with T set to `RenderEntity`.
+            let component =
+                unsafe { <&RenderEntity as QueryData>::try_fetch(state, fetch, entity, table_row) };
+            component.map(RenderEntity::id)
         }
     }
 
@@ -459,6 +478,13 @@ mod render_entities_world_query_impls {
         ) -> bool {
             <&MainEntity as WorldQuery>::matches_component_set(&state, set_contains_id)
         }
+
+        fn may_match_table(
+            state: &Self::State,
+            set_contains_id: &impl Fn(ComponentId) -> bool,
+        ) -> bool {
+            <&MainEntity as WorldQuery>::may_match_table(state, set_contains_id)
+        }
     }
 
     // SAFETY: Component access of Self::ReadOnly is a subset of Self.
@@ -485,6 +511,18 @@ mod render_entities_world_query_impls {
             let component =
                 unsafe { <&MainEntity as QueryData>::fetch(state, fetch, entity, table_row) };
             component.id()
+        }
+
+        unsafe fn try_fetch<'w, 's>(
+            state: &'s Self::State,
+            fetch: &mut Self::Fetch<'w>,
+            entity: Entity,
+            table_row: TableRow,
+        ) -> Option<Self::Item<'w, 's>> {
+            // SAFETY: defers to the `&T` implementation, with T set to `MainEntity`.
+            let component =
+                unsafe { <&MainEntity as QueryData>::try_fetch(state, fetch, entity, table_row) };
+            component.map(MainEntity::id)
         }
     }
 

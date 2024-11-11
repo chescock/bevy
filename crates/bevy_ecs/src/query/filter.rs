@@ -418,7 +418,8 @@ macro_rules! impl_or_query_filter {
                 let ($($filter,)*) = fetch;
                 let ($($state,)*) = state;
                 $(
-                    $filter.matches = $filter::matches_component_set($state, &|id| table.has_column(id));
+                    // We know the table but not the archetype, so we must use `may_match_table`.
+                    $filter.matches = $filter::may_match_table($state, &|id| table.has_column(id));
                     if $filter.matches {
                         // SAFETY: The invariants are upheld by the caller.
                         unsafe { $filter::set_table(&mut $filter.fetch, $state, table); }
@@ -436,6 +437,7 @@ macro_rules! impl_or_query_filter {
                 let ($($filter,)*) = fetch;
                 let ($($state,)*) = &state;
                 $(
+                    // Since we know the archetype, we can use the more precise `matches_component_set` check instead of `may_match_table`.
                     $filter.matches = $filter::matches_component_set($state, &|id| archetype.contains(id));
                     if $filter.matches {
                         // SAFETY: The invariants are upheld by the caller.
@@ -477,6 +479,11 @@ macro_rules! impl_or_query_filter {
             fn matches_component_set(state: &Self::State, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
                 let ($($filter,)*) = state;
                 false $(|| $filter::matches_component_set($filter, set_contains_id))*
+            }
+
+            fn may_match_table(_state: &Self::State, _set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
+                let ($($filter,)*) = _state;
+                false $(|| $filter::may_match_table($filter, _set_contains_id))*
             }
         }
 
@@ -768,11 +775,9 @@ unsafe impl<T: Component> WorldQuery for Added<T> {
         _archetype: &'w Archetype,
         table: &'w Table,
     ) {
-        if Self::IS_DENSE {
-            // SAFETY: `set_archetype`'s safety rules are a super set of the `set_table`'s ones.
-            unsafe {
-                Self::set_table(fetch, component_id, table);
-            }
+        // SAFETY: `set_archetype`'s safety rules are a super set of the `set_table`'s ones.
+        unsafe {
+            Self::set_table(fetch, component_id, table);
         }
     }
 
@@ -782,14 +787,17 @@ unsafe impl<T: Component> WorldQuery for Added<T> {
         &component_id: &'s ComponentId,
         table: &'w Table,
     ) {
-        let table_ticks = Some(
-            table
-                .get_added_ticks_slice_for(component_id)
-                .debug_checked_unwrap()
-                .into(),
+        fetch.ticks.update(
+            |table_ticks| {
+                *table_ticks = Some(
+                    table
+                        .get_added_ticks_slice_for(component_id)
+                        .debug_checked_unwrap()
+                        .into(),
+                );
+            },
+            |_sparse_set| {},
         );
-        // SAFETY: set_table is only called when T::STORAGE_TYPE = StorageType::Table
-        unsafe { fetch.ticks.set_table(table_ticks) };
     }
 
     #[inline]
@@ -814,6 +822,15 @@ unsafe impl<T: Component> WorldQuery for Added<T> {
     ) -> bool {
         set_contains_id(id)
     }
+
+    fn may_match_table(&id: &ComponentId, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
+        match T::STORAGE_TYPE {
+            // An entity can only have a table component if it's part of the table
+            StorageType::Table => set_contains_id(id),
+            // Any entity in a table can have a sparse set component
+            StorageType::SparseSet => true,
+        }
+    }
 }
 
 // SAFETY: WorldQuery impl performs only read access on ticks
@@ -837,15 +854,10 @@ unsafe impl<T: Component> QueryFilter for Added<T> {
                 tick.deref().is_newer_than(fetch.last_run, fetch.this_run)
             },
             |sparse_set| {
-                // SAFETY: The caller ensures `entity` is in range.
-                let tick = unsafe {
-                    sparse_set
-                        .debug_checked_unwrap()
-                        .get_added_tick(entity)
-                        .debug_checked_unwrap()
-                };
-
-                tick.deref().is_newer_than(fetch.last_run, fetch.this_run)
+                // This may be `None` if called within an `Or` in a transmuted query using dense iteration
+                sparse_set
+                    .and_then(|sparse_set| sparse_set.get_added_tick(entity))
+                    .is_some_and(|tick| tick.deref().is_newer_than(fetch.last_run, fetch.this_run))
             },
         )
     }
@@ -995,11 +1007,9 @@ unsafe impl<T: Component> WorldQuery for Changed<T> {
         _archetype: &'w Archetype,
         table: &'w Table,
     ) {
-        if Self::IS_DENSE {
-            // SAFETY: `set_archetype`'s safety rules are a super set of the `set_table`'s ones.
-            unsafe {
-                Self::set_table(fetch, component_id, table);
-            }
+        // SAFETY: `set_archetype`'s safety rules are a super set of the `set_table`'s ones.
+        unsafe {
+            Self::set_table(fetch, component_id, table);
         }
     }
 
@@ -1009,14 +1019,17 @@ unsafe impl<T: Component> WorldQuery for Changed<T> {
         &component_id: &'s ComponentId,
         table: &'w Table,
     ) {
-        let table_ticks = Some(
-            table
-                .get_changed_ticks_slice_for(component_id)
-                .debug_checked_unwrap()
-                .into(),
+        fetch.ticks.update(
+            |table_ticks| {
+                *table_ticks = Some(
+                    table
+                        .get_changed_ticks_slice_for(component_id)
+                        .debug_checked_unwrap()
+                        .into(),
+                );
+            },
+            |_sparse_set| {},
         );
-        // SAFETY: set_table is only called when T::STORAGE_TYPE = StorageType::Table
-        unsafe { fetch.ticks.set_table(table_ticks) };
     }
 
     #[inline]
@@ -1040,6 +1053,15 @@ unsafe impl<T: Component> WorldQuery for Changed<T> {
         set_contains_id: &impl Fn(ComponentId) -> bool,
     ) -> bool {
         set_contains_id(id)
+    }
+
+    fn may_match_table(&id: &ComponentId, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
+        match T::STORAGE_TYPE {
+            // An entity can only have a table component if it's part of the table
+            StorageType::Table => set_contains_id(id),
+            // Any entity in a table can have a sparse set component
+            StorageType::SparseSet => true,
+        }
     }
 }
 
@@ -1065,15 +1087,10 @@ unsafe impl<T: Component> QueryFilter for Changed<T> {
                 tick.deref().is_newer_than(fetch.last_run, fetch.this_run)
             },
             |sparse_set| {
-                // SAFETY: The caller ensures `entity` is in range.
-                let tick = unsafe {
-                    sparse_set
-                        .debug_checked_unwrap()
-                        .get_changed_tick(entity)
-                        .debug_checked_unwrap()
-                };
-
-                tick.deref().is_newer_than(fetch.last_run, fetch.this_run)
+                // This may be `None` if called within an `Or` in a transmuted query using dense iteration
+                sparse_set
+                    .and_then(|sparse_set| sparse_set.get_changed_tick(entity))
+                    .is_some_and(|tick| tick.deref().is_newer_than(fetch.last_run, fetch.this_run))
             },
         )
     }

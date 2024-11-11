@@ -130,6 +130,20 @@ pub unsafe trait WorldQuery {
         state: &Self::State,
         set_contains_id: &impl Fn(ComponentId) -> bool,
     ) -> bool;
+
+    /// Checks whether this query may match any entities in the current table.
+    ///
+    /// If it returns true, the caller may call [`WorldQuery::set_table`] and [`QueryData::try_fetch`](crate::query::QueryData::try_fetch).
+    ///
+    /// The default implementation calls [`WorldQuery::matches_component_set`].
+    /// Any implementations that provide this method and return `true` in more cases
+    /// should also provide an implementation of [`QueryData::try_fetch`](crate::query::QueryData::try_fetch) that handles those cases.
+    fn may_match_table(
+        state: &Self::State,
+        set_contains_id: &impl Fn(ComponentId) -> bool,
+    ) -> bool {
+        Self::matches_component_set(state, set_contains_id)
+    }
 }
 
 macro_rules! impl_tuple_world_query {
@@ -214,6 +228,11 @@ macro_rules! impl_tuple_world_query {
             fn matches_component_set(state: &Self::State, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
                 let ($($name,)*) = state;
                 true $(&& $name::matches_component_set($name, set_contains_id))*
+            }
+
+            fn may_match_table(state: &Self::State, _set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
+                let ($($name,)*) = state;
+                true $(&& $name::may_match_table($name, _set_contains_id))*
             }
         }
     };
