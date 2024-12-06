@@ -1,6 +1,6 @@
 use alloc::borrow::Cow;
 
-use super::{IntoSystem, ReadOnlySystem, System};
+use super::{IntoSystem, ReadOnlySystem, RunnableSystemMeta, System};
 use crate::{
     schedule::InternedSystemSet,
     system::{input::SystemInput, SystemIn},
@@ -126,29 +126,6 @@ where
         self.name.clone()
     }
 
-    fn component_access(&self) -> &crate::query::Access<crate::component::ComponentId> {
-        self.system.component_access()
-    }
-
-    #[inline]
-    fn archetype_component_access(
-        &self,
-    ) -> &crate::query::Access<crate::archetype::ArchetypeComponentId> {
-        self.system.archetype_component_access()
-    }
-
-    fn is_send(&self) -> bool {
-        self.system.is_send()
-    }
-
-    fn is_exclusive(&self) -> bool {
-        self.system.is_exclusive()
-    }
-
-    fn has_deferred(&self) -> bool {
-        self.system.has_deferred()
-    }
-
     #[inline]
     unsafe fn run_unsafe(
         &mut self,
@@ -159,12 +136,6 @@ where
         self.func.adapt(input, |input| unsafe {
             self.system.run_unsafe(input, world)
         })
-    }
-
-    #[inline]
-    fn run(&mut self, input: SystemIn<'_, Self>, world: &mut crate::prelude::World) -> Self::Out {
-        self.func
-            .adapt(input, |input| self.system.run(input, world))
     }
 
     #[inline]
@@ -183,13 +154,18 @@ where
         unsafe { self.system.validate_param_unsafe(world) }
     }
 
-    fn initialize(&mut self, world: &mut crate::prelude::World) {
-        self.system.initialize(world);
+    fn initialize(&mut self, world: &mut crate::prelude::World) -> RunnableSystemMeta {
+        self.system.initialize(world)
     }
 
     #[inline]
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        self.system.update_archetype_component_access(world);
+    fn update_archetype_component_access(
+        &mut self,
+        world: UnsafeWorldCell,
+        runnable_system_meta: &mut RunnableSystemMeta,
+    ) {
+        self.system
+            .update_archetype_component_access(world, runnable_system_meta);
     }
 
     fn check_change_tick(&mut self, change_tick: crate::component::Tick) {

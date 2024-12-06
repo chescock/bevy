@@ -18,7 +18,7 @@ use crate::{
     prelude::Resource,
     query::Access,
     schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
-    system::BoxedSystem,
+    system::RunnableBoxedSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -29,7 +29,7 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
-    systems: &'sys [SyncUnsafeCell<BoxedSystem>],
+    systems: &'sys [SyncUnsafeCell<RunnableBoxedSystem>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
 }
@@ -269,7 +269,7 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         &self,
         system_index: usize,
         res: Result<(), Box<dyn Any + Send>>,
-        system: &BoxedSystem,
+        system: &RunnableBoxedSystem,
     ) {
         // tell the executor that the system finished
         self.environment
@@ -459,7 +459,7 @@ impl ExecutorState {
     fn can_run(
         &mut self,
         system_index: usize,
-        system: &mut BoxedSystem,
+        system: &mut RunnableBoxedSystem,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
@@ -523,7 +523,7 @@ impl ExecutorState {
     unsafe fn should_run(
         &mut self,
         system_index: usize,
-        system: &mut BoxedSystem,
+        system: &mut RunnableBoxedSystem,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
@@ -572,7 +572,7 @@ impl ExecutorState {
             // - The caller ensures that `world` has permission to read any data
             //   required by the system.
             // - `update_archetype_component_access` has been called for system.
-            let valid_params = unsafe { system.validate_param_unsafe(world) };
+            let valid_params = unsafe { system.system_mut().validate_param_unsafe(world) };
             if !valid_params {
                 self.skipped_systems.insert(system_index);
             }
@@ -710,14 +710,14 @@ impl ExecutorState {
 
 fn apply_deferred(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<BoxedSystem>],
+    systems: &[SyncUnsafeCell<RunnableBoxedSystem>],
     world: &mut World,
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {
         // SAFETY: none of these systems are running, no other references exist
         let system = unsafe { &mut *systems[system_index].get() };
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            system.apply_deferred(world);
+            system.system_mut().apply_deferred(world);
         }));
         if let Err(payload) = res {
             eprintln!(
@@ -748,7 +748,7 @@ unsafe fn evaluate_and_fold_conditions(
             // - The caller ensures that `world` has permission to read any data
             //   required by the condition.
             // - `update_archetype_component_access` has been called for condition.
-            if !unsafe { condition.validate_param_unsafe(world) } {
+            if !unsafe { condition.system_mut().validate_param_unsafe(world) } {
                 return false;
             }
             // SAFETY:

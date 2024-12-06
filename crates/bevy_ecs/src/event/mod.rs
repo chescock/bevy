@@ -517,7 +517,7 @@ mod tests {
         world.init_resource::<Events<TestEvent>>();
 
         let mut reader =
-            IntoSystem::into_system(|mut events: EventReader<TestEvent>| -> Option<TestEvent> {
+            RunnableSystem::new(|mut events: EventReader<TestEvent>| -> Option<TestEvent> {
                 events.read().last().copied()
             });
         reader.initialize(&mut world);
@@ -547,7 +547,7 @@ mod tests {
         world.init_resource::<Events<TestEvent>>();
 
         let mut mutator =
-            IntoSystem::into_system(|mut events: EventMutator<TestEvent>| -> Option<TestEvent> {
+            RunnableSystem::new(|mut events: EventMutator<TestEvent>| -> Option<TestEvent> {
                 events.read().last().copied()
             });
         mutator.initialize(&mut world);

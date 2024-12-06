@@ -302,7 +302,7 @@ where
 /// Note: this will run the system on an empty world.
 pub fn assert_system_does_not_conflict<Out, Params, S: IntoSystem<(), Out, Params>>(sys: S) {
     let mut world = World::new();
-    let mut system = IntoSystem::into_system(sys);
+    let mut system = RunnableSystem::new(sys);
     system.initialize(&mut world);
     system.run((), &mut world);
 }
@@ -328,7 +328,7 @@ mod tests {
         },
         system::{
             assert_is_system, Commands, In, IntoSystem, Local, NonSend, NonSendMut, ParamSet,
-            Query, Res, ResMut, Resource, RunSystemOnce, Single, StaticSystemParam, System,
+            Query, Res, ResMut, Resource, RunSystemOnce, RunnableSystem, Single, StaticSystemParam,
             SystemState,
         },
         world::{EntityMut, FromWorld, World},
@@ -1058,8 +1058,8 @@ mod tests {
         fn sys_y(_: Res<A>, _: ResMut<B>, _: Query<(&C, &mut D)>) {}
 
         let mut world = World::default();
-        let mut x = IntoSystem::into_system(sys_x);
-        let mut y = IntoSystem::into_system(sys_y);
+        let mut x = RunnableSystem::new(sys_x);
+        let mut y = RunnableSystem::new(sys_y);
         x.initialize(&mut world);
         y.initialize(&mut world);
 
@@ -1424,7 +1424,7 @@ mod tests {
         fn a_not_b_system(_query: Query<&A, Without<B>>) {}
 
         let mut world = World::default();
-        let mut system = IntoSystem::into_system(a_not_b_system);
+        let mut system = RunnableSystem::new(a_not_b_system);
         let mut expected_ids = HashSet::<ArchetypeComponentId>::new();
         let a_id = world.register_component::<A>();
 
@@ -1656,7 +1656,7 @@ mod tests {
 
         let mut world = World::new();
         world.init_resource::<Flag>();
-        let mut sys = IntoSystem::into_system(first.pipe(second));
+        let mut sys = RunnableSystem::new(first.pipe(second));
         sys.initialize(&mut world);
 
         sys.run(default(), &mut world);

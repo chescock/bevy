@@ -162,7 +162,7 @@ pub trait DetectChangesMut: DetectChanges {
     /// }
     /// # let mut world = World::new();
     /// # world.insert_resource(Score(1));
-    /// # let mut score_changed = IntoSystem::into_system(resource_changed::<Score>);
+    /// # let mut score_changed = RunnableSystem::new(resource_changed::<Score>);
     /// # score_changed.initialize(&mut world);
     /// # score_changed.run((), &mut world);
     /// #
@@ -233,11 +233,11 @@ pub trait DetectChangesMut: DetectChanges {
     /// # let mut world = World::new();
     /// # world.insert_resource(Events::<ScoreChanged>::default());
     /// # world.insert_resource(Score(1));
-    /// # let mut score_changed = IntoSystem::into_system(resource_changed::<Score>);
+    /// # let mut score_changed = RunnableSystem::new(resource_changed::<Score>);
     /// # score_changed.initialize(&mut world);
     /// # score_changed.run((), &mut world);
     /// #
-    /// # let mut score_changed_event = IntoSystem::into_system(on_event::<ScoreChanged>);
+    /// # let mut score_changed_event = RunnableSystem::new(on_event::<ScoreChanged>);
     /// # score_changed_event.initialize(&mut world);
     /// # score_changed_event.run((), &mut world);
     /// #
@@ -1206,7 +1206,7 @@ mod tests {
             Mut, NonSendMut, Ref, ResMut, TicksMut, CHECK_TICK_THRESHOLD, MAX_CHANGE_AGE,
         },
         component::{Component, ComponentTicks, Tick},
-        system::{IntoSystem, Single, System},
+        system::{RunnableSystem, Single},
         world::World,
     };
 
@@ -1249,8 +1249,8 @@ mod tests {
         // component added: 1, changed: 1
         world.spawn(C);
 
-        let mut change_detected_system = IntoSystem::into_system(change_detected);
-        let mut change_expired_system = IntoSystem::into_system(change_expired);
+        let mut change_detected_system = RunnableSystem::new(change_detected);
+        let mut change_expired_system = RunnableSystem::new(change_expired);
         change_detected_system.initialize(&mut world);
         change_expired_system.initialize(&mut world);
 

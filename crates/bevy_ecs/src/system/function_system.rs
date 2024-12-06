@@ -51,6 +51,7 @@ pub struct RunnableSystemMeta {
     // NOTE: this must be kept private. making a SystemMeta non-send is irreversible to prevent
     // SystemParams from overriding each other
     is_send: bool,
+    is_exclusive: bool,
     has_deferred: bool,
 }
 
@@ -117,6 +118,7 @@ impl Default for RunnableSystemMeta {
             archetype_component_access: Access::default(),
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
+            is_exclusive: false,
             has_deferred: false,
         }
     }
@@ -168,6 +170,25 @@ impl RunnableSystemMeta {
     #[inline]
     pub fn set_has_deferred(&mut self) {
         self.has_deferred = true;
+    }
+
+    #[inline]
+    pub fn is_exclusive(&self) -> bool {
+        self.is_exclusive
+    }
+
+    #[inline]
+    pub fn set_is_exclusive(&mut self) {
+        self.is_exclusive = true;
+    }
+
+    pub fn extend(&mut self, mut other: RunnableSystemMeta) {
+        self.archetype_component_access
+            .extend(&mut other.archetype_component_access);
+        self.component_access_set.extend(other.component_access_set);
+        self.is_send &= other.is_send;
+        self.is_exclusive |= other.is_exclusive;
+        self.has_deferred |= other.has_deferred;
     }
 }
 
@@ -440,7 +461,6 @@ impl<Param: SystemParam> SystemState<Param> {
                 world_id: self.world_id,
             }),
             system_meta: self.meta,
-            runnable_system_meta: self.runnable_meta,
             archetype_generation: self.archetype_generation,
             marker: PhantomData,
         }
@@ -653,7 +673,6 @@ where
     func: F,
     state: Option<FunctionSystemState<F::Param>>,
     system_meta: SystemMeta,
-    runnable_system_meta: RunnableSystemMeta,
     archetype_generation: ArchetypeGeneration,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
     marker: PhantomData<fn() -> Marker>,
@@ -694,7 +713,6 @@ where
             func: self.func.clone(),
             state: None,
             system_meta: SystemMeta::new::<F>(),
-            runnable_system_meta: RunnableSystemMeta::new(),
             archetype_generation: ArchetypeGeneration::initial(),
             marker: PhantomData,
         }
@@ -716,7 +734,6 @@ where
             func,
             state: None,
             system_meta: SystemMeta::new::<F>(),
-            runnable_system_meta: RunnableSystemMeta::new(),
             archetype_generation: ArchetypeGeneration::initial(),
             marker: PhantomData,
         }
@@ -745,33 +762,6 @@ where
     #[inline]
     fn name(&self) -> Cow<'static, str> {
         self.system_meta.name.clone()
-    }
-
-    #[inline]
-    fn component_access(&self) -> &Access<ComponentId> {
-        self.runnable_system_meta
-            .component_access_set
-            .combined_access()
-    }
-
-    #[inline]
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.runnable_system_meta.archetype_component_access
-    }
-
-    #[inline]
-    fn is_send(&self) -> bool {
-        self.runnable_system_meta.is_send
-    }
-
-    #[inline]
-    fn is_exclusive(&self) -> bool {
-        false
-    }
-
-    #[inline]
-    fn has_deferred(&self) -> bool {
-        self.runnable_system_meta.has_deferred
     }
 
     #[inline]
@@ -826,7 +816,7 @@ where
     }
 
     #[inline]
-    fn initialize(&mut self, world: &mut World) {
+    fn initialize(&mut self, world: &mut World) -> RunnableSystemMeta {
         if let Some(state) = &self.state {
             assert_eq!(
                 state.world_id,
@@ -835,21 +825,27 @@ where
             );
         } else {
             let param = F::Param::init_state(world);
-            F::Param::init_access(
-                &param,
-                &mut self.runnable_system_meta,
-                world,
-                &self.system_meta.name,
-            );
             self.state = Some(FunctionSystemState {
                 param,
                 world_id: world.id(),
             });
         }
+        let mut runnable_system_meta = RunnableSystemMeta::new();
+        F::Param::init_access(
+            &self.state.as_ref().unwrap().param,
+            &mut runnable_system_meta,
+            world,
+            &self.system_meta.name,
+        );
         self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
+        runnable_system_meta
     }
 
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
+    fn update_archetype_component_access(
+        &mut self,
+        world: UnsafeWorldCell,
+        runnable_system_meta: &mut RunnableSystemMeta,
+    ) {
         let state = self.state.as_mut().expect(Self::ERROR_UNINITIALIZED);
         assert_eq!(state.world_id, world.id(), "Encountered a mismatched World. A System cannot be used with Worlds other than the one it was initialized with.");
 
@@ -863,7 +859,7 @@ where
                 F::Param::new_archetype(
                     &mut state.param,
                     archetype,
-                    &mut self.runnable_system_meta.archetype_component_access,
+                    &mut runnable_system_meta.archetype_component_access,
                 )
             };
         }

@@ -18,7 +18,7 @@ use crate::{
     component::{ComponentId, Components, Tick},
     prelude::Component,
     schedule::*,
-    system::{BoxedSystem, IntoSystem, Resource, System},
+    system::{Resource, RunnableBoxedSystem, RunnableSystem, System},
     world::World,
 };
 
@@ -448,19 +448,19 @@ impl Schedule {
     pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
         for system in &mut self.executable.systems {
             if !is_apply_deferred(system) {
-                system.check_change_tick(change_tick);
+                system.system_mut().check_change_tick(change_tick);
             }
         }
 
         for conditions in &mut self.executable.system_conditions {
             for system in conditions {
-                system.check_change_tick(change_tick);
+                system.system_mut().check_change_tick(change_tick);
             }
         }
 
         for conditions in &mut self.executable.set_conditions {
             for system in conditions {
-                system.check_change_tick(change_tick);
+                system.system_mut().check_change_tick(change_tick);
             }
         }
     }
@@ -475,7 +475,7 @@ impl Schedule {
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
         for system in &mut self.executable.systems {
-            system.apply_deferred(world);
+            system.system_mut().apply_deferred(world);
         }
     }
 
@@ -485,7 +485,8 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (NodeId, &BoxedSystem)> + Sized, ScheduleNotInitialized> {
+    ) -> Result<impl Iterator<Item = (NodeId, &RunnableBoxedSystem)> + Sized, ScheduleNotInitialized>
+    {
         if !self.executor_initialized {
             return Err(ScheduleNotInitialized);
         }
@@ -565,21 +566,21 @@ impl SystemSetNode {
 
 /// A [`BoxedSystem`] with metadata, stored in a [`ScheduleGraph`].
 struct SystemNode {
-    inner: Option<BoxedSystem>,
+    inner: Option<RunnableBoxedSystem>,
 }
 
 impl SystemNode {
-    pub fn new(system: BoxedSystem) -> Self {
+    pub fn new(system: RunnableBoxedSystem) -> Self {
         Self {
             inner: Some(system),
         }
     }
 
-    pub fn get(&self) -> Option<&BoxedSystem> {
+    pub fn get(&self) -> Option<&RunnableBoxedSystem> {
         self.inner.as_ref()
     }
 
-    pub fn get_mut(&mut self) -> Option<&mut BoxedSystem> {
+    pub fn get_mut(&mut self) -> Option<&mut RunnableBoxedSystem> {
         self.inner.as_mut()
     }
 }
@@ -642,7 +643,10 @@ impl ScheduleGraph {
     }
 
     /// Returns the system at the given [`NodeId`], if it exists.
-    pub fn get_system_at(&self, id: NodeId) -> Option<&dyn System<In = (), Out = ()>> {
+    pub fn get_system_at(
+        &self,
+        id: NodeId,
+    ) -> Option<&RunnableSystem<dyn System<In = (), Out = ()>>> {
         if !id.is_system() {
             return None;
         }
@@ -660,7 +664,7 @@ impl ScheduleGraph {
     ///
     /// Panics if it doesn't exist.
     #[track_caller]
-    pub fn system_at(&self, id: NodeId) -> &dyn System<In = (), Out = ()> {
+    pub fn system_at(&self, id: NodeId) -> &RunnableSystem<dyn System<In = (), Out = ()>> {
         self.get_system_at(id)
             .ok_or_else(|| format!("system with id {id:?} does not exist in this Schedule"))
             .unwrap()
@@ -687,7 +691,13 @@ impl ScheduleGraph {
     /// Returns an iterator over all systems in this schedule, along with the conditions for each system.
     pub fn systems(
         &self,
-    ) -> impl Iterator<Item = (NodeId, &dyn System<In = (), Out = ()>, &[BoxedCondition])> {
+    ) -> impl Iterator<
+        Item = (
+            NodeId,
+            &RunnableSystem<dyn System<In = (), Out = ()>>,
+            &[BoxedCondition],
+        ),
+    > {
         self.systems
             .iter()
             .zip(self.system_conditions.iter())
@@ -1058,11 +1068,21 @@ impl ScheduleGraph {
                     self.systems[index].get_mut().unwrap().initialize(world);
                     for condition in &mut self.system_conditions[index] {
                         condition.initialize(world);
+                        assert!(
+                            condition.is_send(),
+                            "Condition `{}` accesses `NonSend` resources. This is not currently supported.",
+                            condition.name()
+                        );
                     }
                 }
                 NodeId::Set(index) => {
                     for condition in self.system_set_conditions[index].iter_mut().skip(i) {
                         condition.initialize(world);
+                        assert!(
+                            condition.is_send(),
+                            "Condition `{}` accesses `NonSend` resources. This is not currently supported.",
+                            condition.name()
+                        );
                     }
                 }
             }
@@ -1195,10 +1215,9 @@ impl ScheduleGraph {
     fn add_auto_sync(&mut self) -> NodeId {
         let id = NodeId::System(self.systems.len());
 
-        self.systems
-            .push(SystemNode::new(Box::new(IntoSystem::into_system(
-                apply_deferred,
-            ))));
+        let mut system = RunnableSystem::new_boxed(apply_deferred);
+        system.initialize_as_exclusive();
+        self.systems.push(SystemNode::new(system));
         self.system_conditions.push(Vec::new());
 
         // ignore ambiguities with auto sync points
@@ -1554,7 +1573,7 @@ trait ProcessNodeConfig: Sized {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: NodeConfig<Self>) -> NodeId;
 }
 
-impl ProcessNodeConfig for BoxedSystem {
+impl ProcessNodeConfig for RunnableBoxedSystem {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: NodeConfig<Self>) -> NodeId {
         schedule_graph.add_system_inner(config).unwrap()
     }

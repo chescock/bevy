@@ -1,7 +1,5 @@
 use crate::{
-    archetype::ArchetypeComponentId,
-    component::{ComponentId, Tick},
-    query::Access,
+    component::Tick,
     schedule::{InternedSystemSet, SystemSet},
     system::{
         check_system_change_tick, ExclusiveSystemParam, ExclusiveSystemParamItem, IntoSystem,
@@ -27,7 +25,6 @@ where
     func: F,
     param_state: Option<<F::Param as ExclusiveSystemParam>::State>,
     system_meta: SystemMeta,
-    runnable_system_meta: RunnableSystemMeta,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
     marker: PhantomData<fn() -> Marker>,
 }
@@ -60,7 +57,6 @@ where
             func,
             param_state: None,
             system_meta: SystemMeta::new::<F>(),
-            runnable_system_meta: RunnableSystemMeta::new(),
             marker: PhantomData,
         }
     }
@@ -82,46 +78,12 @@ where
     }
 
     #[inline]
-    fn component_access(&self) -> &Access<ComponentId> {
-        self.runnable_system_meta
-            .component_access_set
-            .combined_access()
-    }
-
-    #[inline]
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.runnable_system_meta.archetype_component_access
-    }
-
-    #[inline]
-    fn is_send(&self) -> bool {
-        // exclusive systems should have access to non-send resources
-        // the executor runs exclusive systems on the main thread, so this
-        // field reflects that constraint
-        false
-    }
-
-    #[inline]
-    fn is_exclusive(&self) -> bool {
-        true
-    }
-
-    #[inline]
-    fn has_deferred(&self) -> bool {
-        // exclusive systems have no deferred system params
-        false
-    }
-
-    #[inline]
     unsafe fn run_unsafe(
         &mut self,
-        _input: SystemIn<'_, Self>,
-        _world: UnsafeWorldCell,
+        input: SystemIn<'_, Self>,
+        world: UnsafeWorldCell,
     ) -> Self::Out {
-        panic!("Cannot run exclusive systems with a shared World reference");
-    }
-
-    fn run(&mut self, input: SystemIn<'_, Self>, world: &mut World) -> Self::Out {
+        let world = unsafe { world.world_mut() };
         world.last_change_tick_scope(self.system_meta.last_run, |world| {
             #[cfg(feature = "trace")]
             let _span_guard = self.system_meta.system_span.enter();
@@ -160,12 +122,21 @@ where
     }
 
     #[inline]
-    fn initialize(&mut self, world: &mut World) {
+    fn initialize(&mut self, world: &mut World) -> RunnableSystemMeta {
         self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
         self.param_state = Some(F::Param::init(world, &mut self.system_meta));
+        let mut runnable_system_meta = RunnableSystemMeta::new();
+        runnable_system_meta.set_non_send();
+        runnable_system_meta.set_is_exclusive();
+        runnable_system_meta
     }
 
-    fn update_archetype_component_access(&mut self, _world: UnsafeWorldCell) {}
+    fn update_archetype_component_access(
+        &mut self,
+        _world: UnsafeWorldCell,
+        _runnable_system_meta: &mut RunnableSystemMeta,
+    ) {
+    }
 
     #[inline]
     fn check_change_tick(&mut self, change_tick: Tick) {

@@ -59,8 +59,8 @@ pub mod prelude {
         system::{
             Commands, Deferred, EntityCommand, EntityCommands, In, InMut, InRef, IntoSystem, Local,
             NonSend, NonSendMut, ParallelCommands, ParamSet, Populated, Query, ReadOnlySystem, Res,
-            ResMut, Resource, Single, System, SystemIn, SystemInput, SystemParamBuilder,
-            SystemParamFunction, WithParamWarnPolicy,
+            ResMut, Resource, RunnableSystem, Single, System, SystemIn, SystemInput,
+            SystemParamBuilder, SystemParamFunction, WithParamWarnPolicy,
         },
         world::{
             Command, EntityMut, EntityRef, EntityWorldMut, FilteredResources, FilteredResourcesMut,

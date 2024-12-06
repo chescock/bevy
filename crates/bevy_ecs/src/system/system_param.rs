@@ -1121,8 +1121,8 @@ unsafe impl<'w> SystemParam for DeferredWorld<'w> {
 /// fn read_from_local(local: Local<usize>) -> usize {
 ///     *local
 /// }
-/// let mut write_system = IntoSystem::into_system(write_to_local);
-/// let mut read_system = IntoSystem::into_system(read_from_local);
+/// let mut write_system = RunnableSystem::new(write_to_local);
+/// let mut read_system = RunnableSystem::new(read_from_local);
 /// write_system.initialize(world);
 /// read_system.initialize(world);
 ///
@@ -2005,10 +2005,7 @@ unsafe impl<T: SystemParam> SystemParam for ParamSet<'_, '_, Vec<T>> {
         let metas = state
             .iter()
             .map(|state| {
-                // Pretend to add each param to the system alone, see if it conflicts
-                let mut meta = system_meta.clone();
-                meta.component_access_set.clear();
-                meta.archetype_component_access.clear();
+                let mut meta = RunnableSystemMeta::new();
                 // Call `init_access` on an empty meta to gather the new access
                 T::init_access(state, &mut meta, world, system_name);
                 // Call it again on a clone of the original meta to check for conflicts
@@ -2018,15 +2015,7 @@ unsafe impl<T: SystemParam> SystemParam for ParamSet<'_, '_, Vec<T>> {
             .collect::<Vec<_>>();
 
         for meta in metas {
-            if !meta.is_send() {
-                system_meta.set_non_send();
-            }
-            system_meta
-                .component_access_set
-                .extend(meta.component_access_set);
-            system_meta
-                .archetype_component_access
-                .extend(&meta.archetype_component_access);
+            system_meta.extend(meta);
         }
     }
 

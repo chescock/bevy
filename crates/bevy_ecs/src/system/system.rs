@@ -7,7 +7,7 @@ use crate::{
     component::{ComponentId, Tick},
     query::Access,
     schedule::InternedSystemSet,
-    system::{input::SystemInput, SystemIn},
+    system::{input::SystemInput, RunnableSystemMeta, SystemIn},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
@@ -40,18 +40,6 @@ pub trait System: Send + Sync + 'static {
     fn type_id(&self) -> TypeId {
         TypeId::of::<Self>()
     }
-    /// Returns the system's component [`Access`].
-    fn component_access(&self) -> &Access<ComponentId>;
-    /// Returns the system's archetype component [`Access`].
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId>;
-    /// Returns true if the system is [`Send`].
-    fn is_send(&self) -> bool;
-
-    /// Returns true if the system must be run exclusively.
-    fn is_exclusive(&self) -> bool;
-
-    /// Returns true if system has deferred buffers.
-    fn has_deferred(&self) -> bool;
 
     /// Runs the system with the given input in the world. Unlike [`System::run`], this function
     /// can be called in parallel with other systems and may break Rust's aliasing rules
@@ -70,24 +58,6 @@ pub trait System: Send + Sync + 'static {
     ///   panics (or otherwise does not return for any reason), this method must not be called.
     unsafe fn run_unsafe(&mut self, input: SystemIn<'_, Self>, world: UnsafeWorldCell)
         -> Self::Out;
-
-    /// Runs the system with the given input in the world.
-    ///
-    /// For [read-only](ReadOnlySystem) systems, see [`run_readonly`], which can be called using `&World`.
-    ///
-    /// Unlike [`System::run_unsafe`], this will apply deferred parameters *immediately*.
-    ///
-    /// [`run_readonly`]: ReadOnlySystem::run_readonly
-    fn run(&mut self, input: SystemIn<'_, Self>, world: &mut World) -> Self::Out {
-        let world_cell = world.as_unsafe_world_cell();
-        self.update_archetype_component_access(world_cell);
-        // SAFETY:
-        // - We have exclusive access to the entire world.
-        // - `update_archetype_component_access` has been called.
-        let ret = unsafe { self.run_unsafe(input, world_cell) };
-        self.apply_deferred(world);
-        ret
-    }
 
     /// Applies any [`Deferred`](crate::system::Deferred) system parameters (or other system buffers) of this system to the world.
     ///
@@ -119,26 +89,19 @@ pub trait System: Send + Sync + 'static {
     ///   panics (or otherwise does not return for any reason), this method must not be called.
     unsafe fn validate_param_unsafe(&mut self, world: UnsafeWorldCell) -> bool;
 
-    /// Safe version of [`System::validate_param_unsafe`].
-    /// that runs on exclusive, single-threaded `world` pointer.
-    fn validate_param(&mut self, world: &World) -> bool {
-        let world_cell = world.as_unsafe_world_cell_readonly();
-        self.update_archetype_component_access(world_cell);
-        // SAFETY:
-        // - We have exclusive access to the entire world.
-        // - `update_archetype_component_access` has been called.
-        unsafe { self.validate_param_unsafe(world_cell) }
-    }
-
     /// Initialize the system.
-    fn initialize(&mut self, _world: &mut World);
+    fn initialize(&mut self, _world: &mut World) -> RunnableSystemMeta;
 
     /// Update the system's archetype component [`Access`].
     ///
     /// ## Note for implementors
     /// `world` may only be used to access metadata. This can be done in safe code
     /// via functions such as [`UnsafeWorldCell::archetypes`].
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell);
+    fn update_archetype_component_access(
+        &mut self,
+        world: UnsafeWorldCell,
+        runnable_system_meta: &mut RunnableSystemMeta,
+    );
 
     /// Checks any [`Tick`]s stored on this system and wraps their value if they get too old.
     ///
@@ -165,6 +128,123 @@ pub trait System: Send + Sync + 'static {
     fn set_last_run(&mut self, last_run: Tick);
 }
 
+pub struct RunnableSystem<S: ?Sized> {
+    runnable_system_meta: RunnableSystemMeta,
+    system: S,
+}
+
+impl<S: System + ?Sized> RunnableSystem<S> {
+    pub fn new<M>(system: impl IntoSystem<S::In, S::Out, M, System = S>) -> Self
+    where
+        S: Sized,
+    {
+        let system = IntoSystem::into_system(system);
+        let runnable_system_meta = RunnableSystemMeta::new();
+        Self {
+            system,
+            runnable_system_meta,
+        }
+    }
+
+    pub fn new_boxed<M>(system: impl IntoSystem<S::In, S::Out, M, System = S>) -> Box<Self>
+    where
+        S: Sized,
+    {
+        Box::new(Self::new(system))
+    }
+
+    pub fn name(&self) -> Cow<'static, str> {
+        self.system.name()
+    }
+
+    pub fn system(&self) -> &S {
+        &self.system
+    }
+
+    pub fn system_mut(&mut self) -> &mut S {
+        &mut self.system
+    }
+
+    pub fn system_type_id(&self) -> TypeId {
+        self.system.type_id()
+    }
+
+    pub fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
+        self.system
+            .update_archetype_component_access(world, &mut self.runnable_system_meta);
+    }
+
+    pub fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
+        &self.runnable_system_meta.archetype_component_access
+    }
+
+    pub fn component_access(&self) -> &Access<ComponentId> {
+        &self
+            .runnable_system_meta
+            .component_access_set
+            .combined_access()
+    }
+
+    pub fn is_send(&self) -> bool {
+        self.runnable_system_meta.is_send()
+    }
+
+    pub fn is_exclusive(&self) -> bool {
+        self.runnable_system_meta.is_exclusive()
+    }
+
+    pub fn has_deferred(&self) -> bool {
+        self.runnable_system_meta.has_deferred()
+    }
+
+    pub unsafe fn run_unsafe(&mut self, input: SystemIn<'_, S>, world: UnsafeWorldCell) -> S::Out {
+        self.system.run_unsafe(input, world)
+    }
+
+    pub fn initialize(&mut self, world: &mut World) {
+        self.runnable_system_meta = self.system.initialize(world);
+    }
+
+    // TODO: Note that this is for apply_deferred
+    pub(crate) fn initialize_as_exclusive(&mut self) {
+        self.runnable_system_meta.set_non_send();
+        self.runnable_system_meta.set_is_exclusive();
+    }
+
+    pub fn run(&mut self, input: SystemIn<'_, S>, world: &mut World) -> S::Out {
+        let world_cell = world.as_unsafe_world_cell();
+        self.system
+            .update_archetype_component_access(world_cell, &mut self.runnable_system_meta);
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - `update_archetype_component_access` has been called.
+        let ret = unsafe { self.system.run_unsafe(input, world_cell) };
+        self.system.apply_deferred(world);
+        ret
+    }
+
+    pub fn validate_param(&mut self, world: &World) -> bool {
+        let world_cell = world.as_unsafe_world_cell_readonly();
+        self.system
+            .update_archetype_component_access(world_cell, &mut self.runnable_system_meta);
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - `update_archetype_component_access` has been called.
+        unsafe { self.system.validate_param_unsafe(world_cell) }
+    }
+
+    pub fn run_deferred(&mut self, input: SystemIn<'_, S>, world: UnsafeWorldCell) {
+        self.system
+            .update_archetype_component_access(world, &mut self.runnable_system_meta);
+        unsafe {
+            if self.system.validate_param_unsafe(world) {
+                self.system.run_unsafe(input, world);
+                self.system.queue_deferred(world.into_deferred());
+            }
+        }
+    }
+}
+
 /// [`System`] types that do not modify the [`World`] when run.
 /// This is implemented for any systems whose parameters all implement [`ReadOnlySystemParam`].
 ///
@@ -178,23 +258,13 @@ pub trait System: Send + Sync + 'static {
 ///
 /// This must only be implemented for system types which do not mutate the `World`
 /// when [`System::run_unsafe`] is called.
-pub unsafe trait ReadOnlySystem: System {
-    /// Runs this system with the given input in the world.
-    ///
-    /// Unlike [`System::run`], this can be called with a shared reference to the world,
-    /// since this system is known not to modify the world.
-    fn run_readonly(&mut self, input: SystemIn<'_, Self>, world: &World) -> Self::Out {
-        let world = world.as_unsafe_world_cell_readonly();
-        self.update_archetype_component_access(world);
-        // SAFETY:
-        // - We have read-only access to the entire world.
-        // - `update_archetype_component_access` has been called.
-        unsafe { self.run_unsafe(input, world) }
-    }
-}
+pub unsafe trait ReadOnlySystem: System {}
 
 /// A convenience type alias for a boxed [`System`] trait object.
 pub type BoxedSystem<In = (), Out = ()> = Box<dyn System<In = In, Out = Out>>;
+
+pub type RunnableBoxedSystem<In = (), Out = ()> =
+    Box<RunnableSystem<dyn System<In = In, Out = Out>>>;
 
 pub(crate) fn check_system_change_tick(last_run: &mut Tick, this_run: Tick, system_name: &str) {
     if last_run.check_tick(this_run) {
@@ -215,8 +285,6 @@ where
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("System")
             .field("name", &self.name())
-            .field("is_exclusive", &self.is_exclusive())
-            .field("is_send", &self.is_send())
             .finish_non_exhaustive()
     }
 }
@@ -346,7 +414,8 @@ impl RunSystemOnce for &mut World {
         T: IntoSystem<In, Out, Marker>,
         In: SystemInput,
     {
-        let mut system: T::System = IntoSystem::into_system(system);
+        let system: T::System = IntoSystem::into_system(system);
+        let mut system = RunnableSystem::new(system);
         system.initialize(self);
         if system.validate_param(self) {
             Ok(system.run(input, self))

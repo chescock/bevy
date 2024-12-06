@@ -2,12 +2,12 @@ use alloc::borrow::Cow;
 use core::ops::Not;
 
 use crate::system::{
-    Adapt, AdapterSystem, CombinatorSystem, Combine, IntoSystem, ReadOnlySystem, System, SystemIn,
-    SystemInput,
+    Adapt, AdapterSystem, CombinatorSystem, Combine, IntoSystem, ReadOnlySystem, RunnableSystem,
+    System, SystemIn, SystemInput,
 };
 
 /// A type-erased run condition stored in a [`Box`].
-pub type BoxedCondition<In = ()> = Box<dyn ReadOnlySystem<In = In, Out = bool>>;
+pub type BoxedCondition<In = ()> = Box<RunnableSystem<dyn ReadOnlySystem<In = In, Out = bool>>>;
 
 /// A system that determines if one or more scheduled systems should run.
 ///

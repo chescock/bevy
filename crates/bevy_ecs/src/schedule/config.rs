@@ -7,18 +7,11 @@ use crate::{
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
         Chain,
     },
-    system::{BoxedSystem, IntoSystem, System},
+    system::{IntoSystem, RunnableBoxedSystem, RunnableSystem},
 };
 
 fn new_condition<M>(condition: impl Condition<M>) -> BoxedCondition {
-    let condition_system = IntoSystem::into_system(condition);
-    assert!(
-        condition_system.is_send(),
-        "Condition `{}` accesses `NonSend` resources. This is not currently supported.",
-        condition_system.name()
-    );
-
-    Box::new(condition_system)
+    RunnableSystem::new_boxed(condition)
 }
 
 fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {
@@ -47,7 +40,7 @@ pub struct NodeConfig<T> {
 }
 
 /// Stores configuration for a single system.
-pub type SystemConfig = NodeConfig<BoxedSystem>;
+pub type SystemConfig = NodeConfig<RunnableBoxedSystem>;
 
 /// A collections of generic [`NodeConfig`]s.
 pub enum NodeConfigs<T> {
@@ -65,12 +58,12 @@ pub enum NodeConfigs<T> {
 }
 
 /// A collection of [`SystemConfig`].
-pub type SystemConfigs = NodeConfigs<BoxedSystem>;
+pub type SystemConfigs = NodeConfigs<RunnableBoxedSystem>;
 
 impl SystemConfigs {
-    fn new_system(system: BoxedSystem) -> Self {
+    fn new_system(system: RunnableBoxedSystem) -> Self {
         // include system in its default sets
-        let sets = system.default_system_sets().into_iter().collect();
+        let sets = system.system().default_system_sets().into_iter().collect();
         Self::NodeConfig(SystemConfig {
             node: system,
             graph_info: GraphInfo {
@@ -522,11 +515,11 @@ where
     F: IntoSystem<(), (), Marker>,
 {
     fn into_configs(self) -> SystemConfigs {
-        SystemConfigs::new_system(Box::new(IntoSystem::into_system(self)))
+        SystemConfigs::new_system(RunnableSystem::new_boxed(self))
     }
 }
 
-impl IntoSystemConfigs<()> for BoxedSystem<(), ()> {
+impl IntoSystemConfigs<()> for RunnableBoxedSystem<(), ()> {
     fn into_configs(self) -> SystemConfigs {
         SystemConfigs::new_system(self)
     }

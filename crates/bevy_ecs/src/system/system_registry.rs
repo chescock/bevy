@@ -5,7 +5,7 @@ use crate::{
     bundle::Bundle,
     change_detection::Mut,
     entity::Entity,
-    system::{input::SystemInput, BoxedSystem, IntoSystem, System},
+    system::{input::SystemInput, IntoSystem, RunnableBoxedSystem, RunnableSystem, System},
     world::{Command, World},
 };
 use bevy_ecs_macros::{Component, Resource};
@@ -18,7 +18,7 @@ use derive_more::derive::{Display, Error};
 #[derive(Component)]
 struct RegisteredSystem<I, O> {
     initialized: bool,
-    system: BoxedSystem<I, O>,
+    system: RunnableBoxedSystem<I, O>,
 }
 
 /// Marker [`Component`](bevy_ecs::component::Component) for identifying [`SystemId`] [`Entity`]s.
@@ -33,10 +33,10 @@ pub struct SystemIdMarker;
 /// This struct is returned by [`World::unregister_system`].
 pub struct RemovedSystem<I = (), O = ()> {
     initialized: bool,
-    system: BoxedSystem<I, O>,
+    system: RunnableBoxedSystem<I, O>,
 }
 
-impl<I, O> RemovedSystem<I, O> {
+impl<I: SystemInput + 'static, O: 'static> RemovedSystem<I, O> {
     /// Is the system initialized?
     /// A system is initialized the first time it's ran.
     pub fn initialized(&self) -> bool {
@@ -44,7 +44,7 @@ impl<I, O> RemovedSystem<I, O> {
     }
 
     /// The system removed from the storage.
-    pub fn system(self) -> BoxedSystem<I, O> {
+    pub fn system(self) -> RunnableBoxedSystem<I, O> {
         self.system
     }
 }
@@ -120,7 +120,7 @@ impl<I: SystemInput, O> core::fmt::Debug for SystemId<I, O> {
 pub struct CachedSystemId<S: System>(pub SystemId<S::In, S::Out>);
 
 /// Creates a [`Bundle`] for a one-shot system entity.
-fn system_bundle<I: 'static, O: 'static>(system: BoxedSystem<I, O>) -> impl Bundle {
+fn system_bundle<I: 'static, O: 'static>(system: RunnableBoxedSystem<I, O>) -> impl Bundle {
     (
         RegisteredSystem {
             initialized: false,
@@ -150,14 +150,17 @@ impl World {
         I: SystemInput + 'static,
         O: 'static,
     {
-        self.register_boxed_system(Box::new(IntoSystem::into_system(system)))
+        self.register_boxed_system(RunnableSystem::new_boxed(system))
     }
 
     /// Similar to [`Self::register_system`], but allows passing in a [`BoxedSystem`].
     ///
     ///  This is useful if the [`IntoSystem`] implementor has already been turned into a
     /// [`System`] trait object and put in a [`Box`].
-    pub fn register_boxed_system<I, O>(&mut self, system: BoxedSystem<I, O>) -> SystemId<I, O>
+    pub fn register_boxed_system<I, O>(
+        &mut self,
+        system: RunnableBoxedSystem<I, O>,
+    ) -> SystemId<I, O>
     where
         I: SystemInput + 'static,
         O: 'static,
@@ -400,7 +403,7 @@ impl World {
         self.resource_scope(|world, mut id: Mut<CachedSystemId<S::System>>| {
             if let Ok(mut entity) = world.get_entity_mut(id.0.entity()) {
                 if !entity.contains::<RegisteredSystem<I, O>>() {
-                    entity.insert(system_bundle(Box::new(IntoSystem::into_system(system))));
+                    entity.insert(system_bundle(RunnableSystem::new_boxed(system)));
                 }
             } else {
                 id.0 = world.register_system(system);
@@ -514,7 +517,7 @@ where
 ///
 /// This command needs an already boxed system to register, and an already spawned entity.
 pub struct RegisterSystem<I: SystemInput + 'static, O: 'static> {
-    system: BoxedSystem<I, O>,
+    system: RunnableBoxedSystem<I, O>,
     entity: Entity,
 }
 
@@ -526,7 +529,7 @@ where
     /// Creates a new [`Command`] struct, which can be added to [`Commands`](crate::system::Commands).
     pub fn new<M, S: IntoSystem<I, O, M> + 'static>(system: S, entity: Entity) -> Self {
         Self {
-            system: Box::new(IntoSystem::into_system(system)),
+            system: RunnableSystem::new_boxed(system),
             entity,
         }
     }

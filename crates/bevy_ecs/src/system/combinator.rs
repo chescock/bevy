@@ -2,12 +2,10 @@ use alloc::borrow::Cow;
 use core::marker::PhantomData;
 
 use crate::{
-    archetype::ArchetypeComponentId,
-    component::{ComponentId, Tick},
+    component::Tick,
     prelude::World,
-    query::Access,
     schedule::InternedSystemSet,
-    system::{input::SystemInput, SystemIn},
+    system::{input::SystemInput, RunnableSystemMeta, SystemIn},
     world::unsafe_world_cell::UnsafeWorldCell,
 };
 
@@ -114,8 +112,6 @@ pub struct CombinatorSystem<Func, A, B> {
     a: A,
     b: B,
     name: Cow<'static, str>,
-    component_access: Access<ComponentId>,
-    archetype_component_access: Access<ArchetypeComponentId>,
 }
 
 impl<Func, A, B> CombinatorSystem<Func, A, B> {
@@ -128,8 +124,6 @@ impl<Func, A, B> CombinatorSystem<Func, A, B> {
             a,
             b,
             name,
-            component_access: Access::new(),
-            archetype_component_access: Access::new(),
         }
     }
 }
@@ -145,26 +139,6 @@ where
 
     fn name(&self) -> Cow<'static, str> {
         self.name.clone()
-    }
-
-    fn component_access(&self) -> &Access<ComponentId> {
-        &self.component_access
-    }
-
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.archetype_component_access
-    }
-
-    fn is_send(&self) -> bool {
-        self.a.is_send() && self.b.is_send()
-    }
-
-    fn is_exclusive(&self) -> bool {
-        self.a.is_exclusive() || self.b.is_exclusive()
-    }
-
-    fn has_deferred(&self) -> bool {
-        self.a.has_deferred() || self.b.has_deferred()
     }
 
     unsafe fn run_unsafe(
@@ -186,19 +160,6 @@ where
         )
     }
 
-    fn run(&mut self, input: SystemIn<'_, Self>, world: &mut World) -> Self::Out {
-        let world = world.as_unsafe_world_cell();
-        Func::combine(
-            input,
-            // SAFETY: Since these closures are `!Send + !Sync + !'static`, they can never
-            // be called in parallel. Since mutable access to `world` only exists within
-            // the scope of either closure, we can be sure they will never alias one another.
-            |input| self.a.run(input, unsafe { world.world_mut() }),
-            #[allow(clippy::undocumented_unsafe_blocks)]
-            |input| self.b.run(input, unsafe { world.world_mut() }),
-        )
-    }
-
     #[inline]
     fn apply_deferred(&mut self, world: &mut World) {
         self.a.apply_deferred(world);
@@ -217,21 +178,22 @@ where
         unsafe { self.a.validate_param_unsafe(world) && self.b.validate_param_unsafe(world) }
     }
 
-    fn initialize(&mut self, world: &mut World) {
-        self.a.initialize(world);
-        self.b.initialize(world);
-        self.component_access.extend(self.a.component_access());
-        self.component_access.extend(self.b.component_access());
+    fn initialize(&mut self, world: &mut World) -> RunnableSystemMeta {
+        let mut a_meta = self.a.initialize(world);
+        let b_meta = self.b.initialize(world);
+        a_meta.extend(b_meta);
+        a_meta
     }
 
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        self.a.update_archetype_component_access(world);
-        self.b.update_archetype_component_access(world);
-
-        self.archetype_component_access
-            .extend(self.a.archetype_component_access());
-        self.archetype_component_access
-            .extend(self.b.archetype_component_access());
+    fn update_archetype_component_access(
+        &mut self,
+        world: UnsafeWorldCell,
+        runnable_system_meta: &mut RunnableSystemMeta,
+    ) {
+        self.a
+            .update_archetype_component_access(world, runnable_system_meta);
+        self.b
+            .update_archetype_component_access(world, runnable_system_meta);
     }
 
     fn check_change_tick(&mut self, change_tick: Tick) {
@@ -352,8 +314,6 @@ pub struct PipeSystem<A, B> {
     a: A,
     b: B,
     name: Cow<'static, str>,
-    component_access: Access<ComponentId>,
-    archetype_component_access: Access<ArchetypeComponentId>,
 }
 
 impl<A, B> PipeSystem<A, B>
@@ -364,13 +324,7 @@ where
 {
     /// Creates a new system that pipes two inner systems.
     pub const fn new(a: A, b: B, name: Cow<'static, str>) -> Self {
-        Self {
-            a,
-            b,
-            name,
-            component_access: Access::new(),
-            archetype_component_access: Access::new(),
-        }
+        Self { a, b, name }
     }
 }
 
@@ -387,26 +341,6 @@ where
         self.name.clone()
     }
 
-    fn component_access(&self) -> &Access<ComponentId> {
-        &self.component_access
-    }
-
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.archetype_component_access
-    }
-
-    fn is_send(&self) -> bool {
-        self.a.is_send() && self.b.is_send()
-    }
-
-    fn is_exclusive(&self) -> bool {
-        self.a.is_exclusive() || self.b.is_exclusive()
-    }
-
-    fn has_deferred(&self) -> bool {
-        self.a.has_deferred() || self.b.has_deferred()
-    }
-
     unsafe fn run_unsafe(
         &mut self,
         input: SystemIn<'_, Self>,
@@ -414,11 +348,6 @@ where
     ) -> Self::Out {
         let value = self.a.run_unsafe(input, world);
         self.b.run_unsafe(value, world)
-    }
-
-    fn run(&mut self, input: SystemIn<'_, Self>, world: &mut World) -> Self::Out {
-        let value = self.a.run(input, world);
-        self.b.run(value, world)
     }
 
     fn apply_deferred(&mut self, world: &mut World) {
@@ -436,25 +365,22 @@ where
         unsafe { self.a.validate_param_unsafe(world) && self.b.validate_param_unsafe(world) }
     }
 
-    fn validate_param(&mut self, world: &World) -> bool {
-        self.a.validate_param(world) && self.b.validate_param(world)
+    fn initialize(&mut self, world: &mut World) -> RunnableSystemMeta {
+        let mut a_meta = self.a.initialize(world);
+        let b_meta = self.b.initialize(world);
+        a_meta.extend(b_meta);
+        a_meta
     }
 
-    fn initialize(&mut self, world: &mut World) {
-        self.a.initialize(world);
-        self.b.initialize(world);
-        self.component_access.extend(self.a.component_access());
-        self.component_access.extend(self.b.component_access());
-    }
-
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        self.a.update_archetype_component_access(world);
-        self.b.update_archetype_component_access(world);
-
-        self.archetype_component_access
-            .extend(self.a.archetype_component_access());
-        self.archetype_component_access
-            .extend(self.b.archetype_component_access());
+    fn update_archetype_component_access(
+        &mut self,
+        world: UnsafeWorldCell,
+        runnable_system_meta: &mut RunnableSystemMeta,
+    ) {
+        self.a
+            .update_archetype_component_access(world, runnable_system_meta);
+        self.b
+            .update_archetype_component_access(world, runnable_system_meta);
     }
 
     fn check_change_tick(&mut self, change_tick: Tick) {

@@ -5,7 +5,7 @@ use crate::{
     observer::{ObserverDescriptor, ObserverTrigger},
     prelude::*,
     query::DebugCheckedUnwrap,
-    system::{IntoObserverSystem, ObserverSystem},
+    system::{IntoObserverSystem, ObserverSystem, RunnableSystem},
     world::DeferredWorld,
 };
 use bevy_ptr::PtrMut;
@@ -274,7 +274,7 @@ impl Observer {
     /// for _any_ entity (or no entity).
     pub fn new<E: Event, B: Bundle, M, I: IntoObserverSystem<E, B, M>>(system: I) -> Self {
         Self {
-            system: Box::new(IntoObserverSystem::into_system(system)),
+            system: RunnableSystem::new_boxed(IntoObserverSystem::into_system(system)),
             descriptor: Default::default(),
             hook_on_add: hook_on_add::<E, B, I::System>,
         }
@@ -361,9 +361,9 @@ fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
     // SAFETY:
     // - observer was triggered so must have an `Observer` component.
     // - observer cannot be dropped or mutated until after the system pointer is already dropped.
-    let system: *mut dyn ObserverSystem<E, B> = unsafe {
+    let system: *mut RunnableSystem<dyn ObserverSystem<E, B>> = unsafe {
         let mut observe = observer_cell.get_mut::<Observer>().debug_checked_unwrap();
-        let system = observe.system.downcast_mut::<S>().unwrap();
+        let system = observe.system.downcast_mut::<RunnableSystem<S>>().unwrap();
         &mut *system
     };
 
@@ -373,11 +373,7 @@ fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
     // - system is an `ObserverSystem` so won't mutate world beyond the access of a `DeferredWorld`
     // - system is the same type erased system from above
     unsafe {
-        (*system).update_archetype_component_access(world);
-        if (*system).validate_param_unsafe(world) {
-            (*system).run_unsafe(trigger, world);
-            (*system).queue_deferred(world.into_deferred());
-        }
+        (*system).run_deferred(trigger, world);
     }
 }
 
@@ -407,10 +403,10 @@ fn hook_on_add<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
         };
 
         // Initialize System
-        let system: *mut dyn ObserverSystem<E, B> =
+        let system: *mut RunnableSystem<dyn ObserverSystem<E, B>> =
             if let Some(mut observe) = world.get_mut::<Observer>(entity) {
                 descriptor.merge(&observe.descriptor);
-                let system = observe.system.downcast_mut::<S>().unwrap();
+                let system = observe.system.downcast_mut::<RunnableSystem<S>>().unwrap();
                 &mut *system
             } else {
                 return;
