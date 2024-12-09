@@ -348,8 +348,9 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 #[allow(non_snake_case)]
                 fn init_access(
                     state: &Self::State,
-                    system_meta: &mut SystemMeta,
+                    system_meta: &mut RunnableSystemMeta,
                     world: &mut World,
+                    system_name: &str,
                 ) {
                     let (#(#param,)*) = state;
                     #(
@@ -358,9 +359,9 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                         #meta.component_access_set.clear();
                         #meta.archetype_component_access.clear();
                         // Call `init_access` on an empty meta to gather the new access
-                        #param::init_access(#param, &mut #meta, world );
+                        #param::init_access(#param, &mut #meta, world, system_name);
                         // Call it again on a clone of the original meta to check for conflicts
-                        #param::init_access(#param, &mut system_meta.clone(), world );
+                        #param::init_access(#param, &mut system_meta.clone(), world, system_name);
                     )*
                     // Make the ParamSet non-send if any of its parameters are non-send.
                     if false #(|| !#meta.is_send())* {
@@ -626,8 +627,8 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
                     }
                 }
 
-                fn init_access(state: &Self::State, system_meta: &mut #path::system::SystemMeta, world: &mut #path::world::World) {
-                    <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::init_access(&state.state, system_meta, world);
+                fn init_access(state: &Self::State, context: &mut #path::system::RunnableSystemMeta, world: &mut #path::world::World, system_name: &str) {
+                    <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::init_access(&state.state, context, world, system_name);
                 }
 
                 unsafe fn new_archetype(state: &mut Self::State, archetype: &#path::archetype::Archetype, archetype_component_access: &mut #path::query::Access<#path::archetype::ArchetypeComponentId>) {

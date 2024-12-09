@@ -5,7 +5,7 @@ use crate::{
     schedule::{InternedSystemSet, SystemSet},
     system::{
         check_system_change_tick, ExclusiveSystemParam, ExclusiveSystemParamItem, IntoSystem,
-        System, SystemIn, SystemInput, SystemMeta,
+        RunnableSystemMeta, System, SystemIn, SystemInput, SystemMeta,
     },
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -27,6 +27,7 @@ where
     func: F,
     param_state: Option<<F::Param as ExclusiveSystemParam>::State>,
     system_meta: SystemMeta,
+    runnable_system_meta: RunnableSystemMeta,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
     marker: PhantomData<fn() -> Marker>,
 }
@@ -59,6 +60,7 @@ where
             func,
             param_state: None,
             system_meta: SystemMeta::new::<F>(),
+            runnable_system_meta: RunnableSystemMeta::new(),
             marker: PhantomData,
         }
     }
@@ -81,12 +83,14 @@ where
 
     #[inline]
     fn component_access(&self) -> &Access<ComponentId> {
-        self.system_meta.component_access_set.combined_access()
+        self.runnable_system_meta
+            .component_access_set
+            .combined_access()
     }
 
     #[inline]
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.system_meta.archetype_component_access
+        &self.runnable_system_meta.archetype_component_access
     }
 
     #[inline]

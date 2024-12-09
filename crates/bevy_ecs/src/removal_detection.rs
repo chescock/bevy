@@ -7,7 +7,7 @@ use crate::{
     event::{Event, EventCursor, EventId, EventIterator, EventIteratorWithId, Events},
     prelude::Local,
     storage::SparseSet,
-    system::{ReadOnlySystemParam, SystemMeta, SystemParam},
+    system::{ReadOnlySystemParam, RunnableSystemMeta, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -258,7 +258,13 @@ unsafe impl<'a> SystemParam for &'a RemovedComponentEvents {
 
     fn init_state(_world: &mut World) -> Self::State {}
 
-    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
+    fn init_access(
+        _state: &Self::State,
+        _system_meta: &mut RunnableSystemMeta,
+        _world: &mut World,
+        _system_name: &str,
+    ) {
+    }
 
     #[inline]
     unsafe fn get_param<'w, 's>(

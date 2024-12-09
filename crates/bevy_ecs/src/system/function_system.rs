@@ -24,6 +24,16 @@ use super::{In, IntoSystem, ReadOnlySystem, SystemParamBuilder};
 #[derive(Clone)]
 pub struct SystemMeta {
     pub(crate) name: Cow<'static, str>,
+    pub(crate) last_run: Tick,
+    param_warn_policy: ParamWarnPolicy,
+    #[cfg(feature = "trace")]
+    pub(crate) system_span: Span,
+    #[cfg(feature = "trace")]
+    pub(crate) commands_span: Span,
+}
+
+#[derive(Clone)]
+pub struct RunnableSystemMeta {
     /// The set of component accesses for this system. This is used to determine
     /// - soundness issues (e.g. multiple [`SystemParam`]s mutably accessing the same component)
     /// - ambiguities in the schedule (e.g. two systems that have some sort of conflicting access)
@@ -42,12 +52,6 @@ pub struct SystemMeta {
     // SystemParams from overriding each other
     is_send: bool,
     has_deferred: bool,
-    pub(crate) last_run: Tick,
-    param_warn_policy: ParamWarnPolicy,
-    #[cfg(feature = "trace")]
-    pub(crate) system_span: Span,
-    #[cfg(feature = "trace")]
-    pub(crate) commands_span: Span,
 }
 
 impl SystemMeta {
@@ -55,10 +59,6 @@ impl SystemMeta {
         let name = core::any::type_name::<T>();
         Self {
             name: name.into(),
-            archetype_component_access: Access::default(),
-            component_access_set: FilteredAccessSet::default(),
-            is_send: true,
-            has_deferred: false,
             last_run: Tick::new(0),
             param_warn_policy: ParamWarnPolicy::Once,
             #[cfg(feature = "trace")]
@@ -89,6 +89,60 @@ impl SystemMeta {
         self.name = new_name;
     }
 
+    /// Changes the warn policy.
+    #[inline]
+    pub(crate) fn set_param_warn_policy(&mut self, warn_policy: ParamWarnPolicy) {
+        self.param_warn_policy = warn_policy;
+    }
+
+    /// Advances the warn policy after validation failed.
+    #[inline]
+    pub(crate) fn advance_param_warn_policy(&mut self) {
+        self.param_warn_policy.advance();
+    }
+
+    /// Emits a warning about inaccessible system param if policy allows it.
+    #[inline]
+    pub fn try_warn_param<P>(&self)
+    where
+        P: SystemParam,
+    {
+        self.param_warn_policy.try_warn::<P>(&self.name);
+    }
+}
+
+impl Default for RunnableSystemMeta {
+    fn default() -> Self {
+        Self {
+            archetype_component_access: Access::default(),
+            component_access_set: FilteredAccessSet::default(),
+            is_send: true,
+            has_deferred: false,
+        }
+    }
+}
+
+impl RunnableSystemMeta {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn component_access_set(&self) -> &FilteredAccessSet<ComponentId> {
+        &self.component_access_set
+    }
+
+    pub fn component_access_set_mut(&mut self) -> &mut FilteredAccessSet<ComponentId> {
+        &mut self.component_access_set
+    }
+
+    pub fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
+        &self.archetype_component_access
+    }
+
+    pub fn archetype_component_access_mut(&mut self) -> &mut Access<ArchetypeComponentId> {
+        &mut self.archetype_component_access
+    }
+
     /// Returns true if the system is [`Send`].
     #[inline]
     pub fn is_send(&self) -> bool {
@@ -114,27 +168,6 @@ impl SystemMeta {
     #[inline]
     pub fn set_has_deferred(&mut self) {
         self.has_deferred = true;
-    }
-
-    /// Changes the warn policy.
-    #[inline]
-    pub(crate) fn set_param_warn_policy(&mut self, warn_policy: ParamWarnPolicy) {
-        self.param_warn_policy = warn_policy;
-    }
-
-    /// Advances the warn policy after validation failed.
-    #[inline]
-    pub(crate) fn advance_param_warn_policy(&mut self) {
-        self.param_warn_policy.advance();
-    }
-
-    /// Emits a warning about inaccessible system param if policy allows it.
-    #[inline]
-    pub fn try_warn_param<P>(&self)
-    where
-        P: SystemParam,
-    {
-        self.param_warn_policy.try_warn::<P>(&self.name);
     }
 }
 
@@ -295,6 +328,7 @@ where
 /// ```
 pub struct SystemState<Param: SystemParam + 'static> {
     meta: SystemMeta,
+    runnable_meta: RunnableSystemMeta,
     param_state: Param::State,
     world_id: WorldId,
     archetype_generation: ArchetypeGeneration,
@@ -365,9 +399,11 @@ impl<Param: SystemParam> SystemState<Param> {
         let mut meta = SystemMeta::new::<Param>();
         meta.last_run = world.change_tick().relative_to(Tick::MAX);
         let param_state = Param::init_state(world);
-        Param::init_access(&param_state, &mut meta, world);
+        let mut runnable_meta = RunnableSystemMeta::new();
+        Param::init_access(&param_state, &mut runnable_meta, world, &*meta.name());
         Self {
             meta,
+            runnable_meta,
             param_state,
             world_id: world.id(),
             archetype_generation: ArchetypeGeneration::initial(),
@@ -379,9 +415,11 @@ impl<Param: SystemParam> SystemState<Param> {
         let mut meta = SystemMeta::new::<Param>();
         meta.last_run = world.change_tick().relative_to(Tick::MAX);
         let param_state = builder.build(world);
-        Param::init_access(&param_state, &mut meta, world);
+        let mut runnable_meta = RunnableSystemMeta::new();
+        Param::init_access(&param_state, &mut runnable_meta, world, &meta.name);
         Self {
             meta,
+            runnable_meta,
             param_state,
             world_id: world.id(),
             archetype_generation: ArchetypeGeneration::initial(),
@@ -402,6 +440,7 @@ impl<Param: SystemParam> SystemState<Param> {
                 world_id: self.world_id,
             }),
             system_meta: self.meta,
+            runnable_system_meta: self.runnable_meta,
             archetype_generation: self.archetype_generation,
             marker: PhantomData,
         }
@@ -513,7 +552,7 @@ impl<Param: SystemParam> SystemState<Param> {
                 Param::new_archetype(
                     &mut self.param_state,
                     archetype,
-                    &mut self.meta.archetype_component_access,
+                    &mut self.runnable_meta.archetype_component_access,
                 )
             };
         }
@@ -614,6 +653,7 @@ where
     func: F,
     state: Option<FunctionSystemState<F::Param>>,
     system_meta: SystemMeta,
+    runnable_system_meta: RunnableSystemMeta,
     archetype_generation: ArchetypeGeneration,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
     marker: PhantomData<fn() -> Marker>,
@@ -654,6 +694,7 @@ where
             func: self.func.clone(),
             state: None,
             system_meta: SystemMeta::new::<F>(),
+            runnable_system_meta: RunnableSystemMeta::new(),
             archetype_generation: ArchetypeGeneration::initial(),
             marker: PhantomData,
         }
@@ -675,6 +716,7 @@ where
             func,
             state: None,
             system_meta: SystemMeta::new::<F>(),
+            runnable_system_meta: RunnableSystemMeta::new(),
             archetype_generation: ArchetypeGeneration::initial(),
             marker: PhantomData,
         }
@@ -707,17 +749,19 @@ where
 
     #[inline]
     fn component_access(&self) -> &Access<ComponentId> {
-        self.system_meta.component_access_set.combined_access()
+        self.runnable_system_meta
+            .component_access_set
+            .combined_access()
     }
 
     #[inline]
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.system_meta.archetype_component_access
+        &self.runnable_system_meta.archetype_component_access
     }
 
     #[inline]
     fn is_send(&self) -> bool {
-        self.system_meta.is_send
+        self.runnable_system_meta.is_send
     }
 
     #[inline]
@@ -727,7 +771,7 @@ where
 
     #[inline]
     fn has_deferred(&self) -> bool {
-        self.system_meta.has_deferred
+        self.runnable_system_meta.has_deferred
     }
 
     #[inline]
@@ -791,7 +835,12 @@ where
             );
         } else {
             let param = F::Param::init_state(world);
-            F::Param::init_access(&param, &mut self.system_meta, world);
+            F::Param::init_access(
+                &param,
+                &mut self.runnable_system_meta,
+                world,
+                &self.system_meta.name,
+            );
             self.state = Some(FunctionSystemState {
                 param,
                 world_id: world.id(),
@@ -814,7 +863,7 @@ where
                 F::Param::new_archetype(
                     &mut state.param,
                     archetype,
-                    &mut self.system_meta.archetype_component_access,
+                    &mut self.runnable_system_meta.archetype_component_access,
                 )
             };
         }

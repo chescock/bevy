@@ -1,7 +1,9 @@
 use crate::{
     component::Tick,
     storage::SparseSetIndex,
-    system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemMeta, SystemParam},
+    system::{
+        ExclusiveSystemParam, ReadOnlySystemParam, RunnableSystemMeta, SystemMeta, SystemParam,
+    },
     world::{FromWorld, World},
 };
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -55,7 +57,13 @@ unsafe impl SystemParam for WorldId {
 
     fn init_state(_: &mut World) -> Self::State {}
 
-    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
+    fn init_access(
+        _state: &Self::State,
+        _system_meta: &mut RunnableSystemMeta,
+        _world: &mut World,
+        _system_name: &str,
+    ) {
+    }
 
     #[inline]
     unsafe fn get_param<'world, 'state>(

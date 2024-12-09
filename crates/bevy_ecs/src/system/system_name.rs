@@ -1,7 +1,9 @@
 use crate::{
     component::Tick,
     prelude::World,
-    system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemMeta, SystemParam},
+    system::{
+        ExclusiveSystemParam, ReadOnlySystemParam, RunnableSystemMeta, SystemMeta, SystemParam,
+    },
     world::unsafe_world_cell::UnsafeWorldCell,
 };
 use alloc::borrow::Cow;
@@ -59,7 +61,13 @@ unsafe impl SystemParam for SystemName {
 
     fn init_state(_world: &mut World) -> Self::State {}
 
-    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
+    fn init_access(
+        _state: &Self::State,
+        _system_meta: &mut RunnableSystemMeta,
+        _world: &mut World,
+        _system_name: &str,
+    ) {
+    }
 
     #[inline]
     unsafe fn get_param<'w, 's>(
