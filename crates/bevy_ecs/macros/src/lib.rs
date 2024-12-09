@@ -376,9 +376,9 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                     )*
                 }
 
-                unsafe fn new_archetype(state: &mut Self::State, archetype: &Archetype, system_meta: &mut SystemMeta) {
+                unsafe fn new_archetype(state: &mut Self::State, archetype: &Archetype, archetype_component_access: &mut Access<ArchetypeComponentId>) {
                     // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
-                    unsafe { <(#(#param,)*) as SystemParam>::new_archetype(state, archetype, system_meta); }
+                    unsafe { <(#(#param,)*) as SystemParam>::new_archetype(state, archetype, archetype_component_access); }
                 }
 
                 fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
@@ -630,9 +630,9 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
                     <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::init_access(&state.state, system_meta, world);
                 }
 
-                unsafe fn new_archetype(state: &mut Self::State, archetype: &#path::archetype::Archetype, system_meta: &mut #path::system::SystemMeta) {
+                unsafe fn new_archetype(state: &mut Self::State, archetype: &#path::archetype::Archetype, archetype_component_access: &mut #path::query::Access<#path::archetype::ArchetypeComponentId>) {
                     // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
-                    unsafe { <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::new_archetype(&mut state.state, archetype, system_meta) }
+                    unsafe { <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::new_archetype(&mut state.state, archetype, archetype_component_access) }
                 }
 
                 fn apply(state: &mut Self::State, system_meta: &#path::system::SystemMeta, world: &mut #path::world::World) {
