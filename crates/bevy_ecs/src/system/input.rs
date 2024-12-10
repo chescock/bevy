@@ -52,17 +52,16 @@ impl SystemInput for () {
 /// Here is a simple example of a system that takes a [`usize`] and returns the square of it.
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
+/// # use bevy_ecs::{prelude::*, system::RunSystemOnce};
 /// #
 /// fn square(In(input): In<usize>) -> usize {
 ///     input * input
 /// }
 ///
 /// let mut world = World::new();
-/// let mut square_system = IntoSystem::into_system(square);
-/// square_system.initialize(&mut world);
+/// let output = world.run_system_once_with(12, square).unwrap();
 ///
-/// assert_eq!(square_system.run(12, &mut world), 144);
+/// assert_eq!(output, 144);
 /// ```
 ///
 /// [`SystemParam`]: crate::system::SystemParam
@@ -104,7 +103,7 @@ impl<T> DerefMut for In<T> {
 /// Here is a simple example of a system that logs the passed in message.
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
+/// # use bevy_ecs::{prelude::*, system::RunSystemOnce};
 /// # use std::fmt::Write as _;
 /// #
 /// #[derive(Resource, Default)]
@@ -116,10 +115,8 @@ impl<T> DerefMut for In<T> {
 ///
 /// let mut world = World::new();
 /// world.init_resource::<Log>();
-/// let mut log_system = IntoSystem::into_system(log);
-/// log_system.initialize(&mut world);
+/// world.run_system_once_with("Hello, world!", log).unwrap();
 ///
-/// log_system.run("Hello, world!", &mut world);
 /// # assert_eq!(world.get_resource::<Log>().unwrap().0, "Hello, world!\n");
 /// ```
 ///
@@ -155,18 +152,16 @@ impl<'i, T: ?Sized> Deref for InRef<'i, T> {
 /// Here is a simple example of a system that takes a `&mut usize` and squares it.
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
+/// # use bevy_ecs::{prelude::*, system::RunSystemOnce};
 /// #
 /// fn square(InMut(input): InMut<usize>) {
 ///     *input *= *input;
 /// }
 ///
 /// let mut world = World::new();
-/// let mut square_system = IntoSystem::into_system(square);
-/// square_system.initialize(&mut world);
-///     
+///
 /// let mut value = 12;
-/// square_system.run(&mut value, &mut world);
+/// world.run_system_once_with(&mut value, square);
 /// assert_eq!(value, 144);
 /// ```
 ///

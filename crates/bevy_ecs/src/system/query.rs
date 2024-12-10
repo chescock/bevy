@@ -168,10 +168,7 @@ use core::{
 ///     enemy_query: Query<&mut Health, With<Enemy>>,
 /// )
 /// # {}
-/// # let mut randomize_health_system = IntoSystem::into_system(randomize_health);
-/// # let mut world = World::new();
-/// # randomize_health_system.initialize(&mut world);
-/// # randomize_health_system.run((), &mut world);
+/// # bevy_ecs::system::assert_system_does_not_conflict(randomize_health);
 /// ```
 ///
 /// Adding a `Without` filter will disjoint the queries.
@@ -191,10 +188,7 @@ use core::{
 ///     enemy_query: Query<&mut Health, (With<Enemy>, Without<Player>)>,
 /// )
 /// # {}
-/// # let mut randomize_health_system = IntoSystem::into_system(randomize_health);
-/// # let mut world = World::new();
-/// # randomize_health_system.initialize(&mut world);
-/// # randomize_health_system.run((), &mut world);
+/// # bevy_ecs::system::assert_system_does_not_conflict(randomize_health);
 /// ```
 ///
 /// An alternative to this idiom is to wrap the conflicting queries into a [`ParamSet`](super::ParamSet).

@@ -327,8 +327,9 @@ mod tests {
             Schedule,
         },
         system::{
-            Commands, In, IntoSystem, Local, NonSend, NonSendMut, ParamSet, Query, Res, ResMut,
-            Resource, Single, StaticSystemParam, System, SystemState,
+            assert_is_system, Commands, In, IntoSystem, Local, NonSend, NonSendMut, ParamSet,
+            Query, Res, ResMut, Resource, RunSystemOnce, Single, StaticSystemParam, System,
+            SystemState,
         },
         world::{EntityMut, FromWorld, World},
     };
@@ -363,12 +364,10 @@ mod tests {
             }
         }
 
-        let mut system = IntoSystem::into_system(sys);
         let mut world = World::new();
         world.spawn(A);
 
-        system.initialize(&mut world);
-        system.run((), &mut world);
+        assert_is_system(sys);
     }
 
     fn run_system<Marker, S: IntoSystem<(), (), Marker>>(world: &mut World, system: S) {
@@ -1088,13 +1087,8 @@ mod tests {
         let mut world = World::default();
         world.spawn(A).insert(C);
 
-        let mut without_filter = IntoSystem::into_system(without_filter);
-        without_filter.initialize(&mut world);
-        without_filter.run((), &mut world);
-
-        let mut with_filter = IntoSystem::into_system(with_filter);
-        with_filter.initialize(&mut world);
-        with_filter.run((), &mut world);
+        world.run_system_once(without_filter).unwrap();
+        world.run_system_once(with_filter).unwrap();
     }
 
     #[test]
@@ -1138,11 +1132,8 @@ mod tests {
             ),
         ) {
         }
-        let mut world = World::default();
-        let mut x = IntoSystem::into_system(sys_x);
-        let mut y = IntoSystem::into_system(sys_y);
-        x.initialize(&mut world);
-        y.initialize(&mut world);
+        assert_is_system(sys_x);
+        assert_is_system(sys_y);
     }
 
     #[test]
@@ -1330,8 +1321,6 @@ mod tests {
     #[test]
     fn convert_mut_to_immut() {
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<&mut A>) {
                 for _ in &mut query {}
 
@@ -1340,13 +1329,10 @@ mod tests {
 
             fn immutable_query(_: Query<&A>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<Option<&mut A>>) {
                 for _ in &mut query {}
 
@@ -1355,13 +1341,10 @@ mod tests {
 
             fn immutable_query(_: Query<Option<&A>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<(&mut A, &B)>) {
                 for _ in &mut query {}
 
@@ -1370,13 +1353,10 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B)>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<(&mut A, &mut B)>) {
                 for _ in &mut query {}
 
@@ -1385,13 +1365,10 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B)>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<(&mut A, &mut B), With<C>>) {
                 for _ in &mut query {}
 
@@ -1400,13 +1377,10 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), With<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<(&mut A, &mut B), Without<C>>) {
                 for _ in &mut query {}
 
@@ -1415,13 +1389,10 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), Without<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<(&mut A, &mut B), Added<C>>) {
                 for _ in &mut query {}
 
@@ -1430,13 +1401,10 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), Added<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
 
         {
-            let mut world = World::new();
-
             fn mutable_query(mut query: Query<(&mut A, &mut B), Changed<C>>) {
                 for _ in &mut query {}
 
@@ -1445,8 +1413,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), Changed<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            assert_is_system(mutable_query);
         }
     }
 

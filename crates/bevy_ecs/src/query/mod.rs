@@ -109,7 +109,7 @@ mod tests {
         prelude::{AnyOf, Changed, Entity, Or, QueryState, With, Without},
         query::{ArchetypeFilter, Has, QueryCombinationIter, ReadOnlyQueryData},
         schedule::{IntoSystemConfigs, Schedule},
-        system::{IntoSystem, Query, System, SystemState},
+        system::{Query, RunSystemOnce, SystemState},
         world::World,
     };
     use bevy_ecs_macros::{QueryData, QueryFilter};
@@ -697,9 +697,7 @@ mod tests {
             fn system(has_a: Query<Entity, With<A>>, has_a_and_b: Query<(&A, &B)>) {
                 assert_eq!(has_a_and_b.iter_many(&has_a).count(), 2);
             }
-            let mut system = IntoSystem::into_system(system);
-            system.initialize(&mut world);
-            system.run((), &mut world);
+            world.run_system_once(system).unwrap();
         }
         {
             fn system(has_a: Query<Entity, With<A>>, mut b_query: Query<&mut B>) {
@@ -708,9 +706,7 @@ mod tests {
                     b.0 = 1;
                 }
             }
-            let mut system = IntoSystem::into_system(system);
-            system.initialize(&mut world);
-            system.run((), &mut world);
+            world.run_system_once(system).unwrap();
         }
         {
             fn system(query: Query<(Option<&A>, &B)>) {
@@ -721,9 +717,7 @@ mod tests {
                     }
                 }
             }
-            let mut system = IntoSystem::into_system(system);
-            system.initialize(&mut world);
-            system.run((), &mut world);
+            world.run_system_once(system).unwrap();
         }
     }
 

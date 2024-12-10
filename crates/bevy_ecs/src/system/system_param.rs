@@ -587,10 +587,7 @@ unsafe impl<'w, 's, D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static> Re
 ///     // ...
 /// }
 /// #
-/// # let mut bad_system_system = IntoSystem::into_system(bad_system);
-/// # let mut world = World::new();
-/// # bad_system_system.initialize(&mut world);
-/// # bad_system_system.run((), &mut world);
+/// # bevy_ecs::system::assert_system_does_not_conflict(bad_system);
 /// ```
 ///
 /// Conflicting `SystemParam`s like these can be placed in a `ParamSet`,

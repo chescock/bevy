@@ -853,7 +853,7 @@ where
 /// use std::num::ParseIntError;
 ///
 /// use bevy_ecs::prelude::*;
-/// use bevy_ecs::system::StaticSystemInput;
+/// use bevy_ecs::system::{StaticSystemInput, RunSystemOnce};
 ///
 /// /// Pipe creates a new system which calls `a`, then calls `b` with the output of `a`
 /// pub fn pipe<A, B, AMarker, BMarker>(
@@ -879,9 +879,9 @@ where
 ///     world.insert_resource(Message("42".to_string()));
 ///
 ///     // pipe the `parse_message_system`'s output into the `filter_system`s input
-///     let mut piped_system = IntoSystem::into_system(pipe(parse_message, filter));
-///     piped_system.initialize(&mut world);
-///     assert_eq!(piped_system.run((), &mut world), Some(42));
+///     let piped_system = pipe(parse_message, filter);
+///     let output = world.run_system_once_with((), piped_system).unwrap();
+///     assert_eq!(output, Some(42));
 /// }
 ///
 /// #[derive(Resource)]

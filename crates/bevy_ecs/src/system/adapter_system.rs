@@ -12,7 +12,7 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
+/// # use bevy_ecs::{prelude::*, system::RunSystemOnce};
 /// use bevy_ecs::system::{Adapt, AdapterSystem};
 ///
 /// // A system adapter that inverts the result of a system.
@@ -40,8 +40,7 @@ use crate::{
 /// }
 /// # let mut world = World::new();
 /// # let mut system = NotSystem::new(NotMarker, IntoSystem::into_system(|| false), "".into());
-/// # system.initialize(&mut world);
-/// # assert!(system.run((), &mut world));
+/// # assert!(world.run_system_once(system).unwrap());
 /// ```
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can not adapt a system of type `{S}`",
