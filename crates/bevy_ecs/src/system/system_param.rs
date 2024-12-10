@@ -178,7 +178,7 @@ use variadics_please::all_tuples;
 /// # Safety
 ///
 /// The implementor must ensure the following is true.
-/// - [`SystemParam::init_state`] correctly registers all [`World`] accesses used
+/// - [`SystemParam::init_access`] correctly registers all [`World`] accesses used
 ///   by [`SystemParam::get_param`] with the provided [`system_meta`](SystemMeta).
 /// - None of the world accesses may conflict with any prior accesses registered
 ///   on `system_meta`.
@@ -192,9 +192,11 @@ pub unsafe trait SystemParam: Sized {
     /// You could think of [`SystemParam::Item<'w, 's>`] as being an *operation* that changes the lifetimes bound to `Self`.
     type Item<'world, 'state>: SystemParam<State = Self::State>;
 
+    /// Creates a new instance of this param's [`State`](SystemParam::State).
+    fn init_state(world: &mut World) -> Self::State;
+
     /// Registers any [`World`] access used by this [`SystemParam`]
-    /// and creates a new instance of this param's [`State`](SystemParam::State).
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State;
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World);
 
     /// For the specified [`Archetype`], registers the components accessed by this [`SystemParam`] (if applicable).a
     ///
@@ -296,10 +298,22 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Qu
     type State = QueryState<D, F>;
     type Item<'w, 's> = Query<'w, 's, D, F>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        let state = QueryState::new_with_access(world, &mut system_meta.archetype_component_access);
-        init_query_param(world, system_meta, &state);
-        state
+    fn init_state(world: &mut World) -> Self::State {
+        QueryState::new_uninitialized(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        assert_component_access_compatibility(
+            &system_meta.name(),
+            core::any::type_name::<D>(),
+            core::any::type_name::<F>(),
+            &system_meta.component_access_set,
+            &state.component_access,
+            world,
+        );
+        system_meta
+            .component_access_set
+            .add(state.component_access.clone());
     }
 
     unsafe fn new_archetype(
@@ -324,24 +338,6 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Qu
     }
 }
 
-pub(crate) fn init_query_param<D: QueryData + 'static, F: QueryFilter + 'static>(
-    world: &mut World,
-    system_meta: &mut SystemMeta,
-    state: &QueryState<D, F>,
-) {
-    assert_component_access_compatibility(
-        &system_meta.name,
-        core::any::type_name::<D>(),
-        core::any::type_name::<F>(),
-        &system_meta.component_access_set,
-        &state.component_access,
-        world,
-    );
-    system_meta
-        .component_access_set
-        .add(state.component_access.clone());
-}
-
 fn assert_component_access_compatibility(
     system_name: &str,
     query_type: &'static str,
@@ -364,8 +360,12 @@ unsafe impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam fo
     type State = QueryState<D, F>;
     type Item<'w, 's> = Single<'w, D, F>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        Query::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        Query::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        Query::init_access(state, system_meta, world);
     }
 
     unsafe fn new_archetype(
@@ -428,8 +428,12 @@ unsafe impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam
     type State = QueryState<D, F>;
     type Item<'w, 's> = Option<Single<'w, D, F>>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        Single::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        Single::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        Single::init_access(state, system_meta, world)
     }
 
     unsafe fn new_archetype(
@@ -506,8 +510,12 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam
     type State = QueryState<D, F>;
     type Item<'w, 's> = Populated<'w, 's, D, F>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        Query::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        Query::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        Query::init_access(state, system_meta, world)
     }
 
     unsafe fn new_archetype(
@@ -744,8 +752,11 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
     type State = ComponentId;
     type Item<'w, 's> = Res<'w, T>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        let component_id = world.components.register_resource::<T>();
+    fn init_state(world: &mut World) -> Self::State {
+        world.components.register_resource::<T>()
+    }
+
+    fn init_access(&component_id: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
         let archetype_component_id = world.initialize_resource_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
@@ -762,8 +773,6 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
         system_meta
             .archetype_component_access
             .add_resource_read(archetype_component_id);
-
-        component_id
     }
 
     #[inline]
@@ -822,8 +831,12 @@ unsafe impl<'a, T: Resource> SystemParam for Option<Res<'a, T>> {
     type State = ComponentId;
     type Item<'w, 's> = Option<Res<'w, T>>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        Res::<T>::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        Res::<T>::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        Res::<T>::init_access(state, system_meta, world)
     }
 
     #[inline]
@@ -855,8 +868,11 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
     type State = ComponentId;
     type Item<'w, 's> = ResMut<'w, T>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        let component_id = world.components.register_resource::<T>();
+    fn init_state(world: &mut World) -> Self::State {
+        world.components.register_resource::<T>()
+    }
+
+    fn init_access(&component_id: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
         let archetype_component_id = world.initialize_resource_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
@@ -876,8 +892,6 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
         system_meta
             .archetype_component_access
             .add_resource_write(archetype_component_id);
-
-        component_id
     }
 
     #[inline]
@@ -932,8 +946,12 @@ unsafe impl<'a, T: Resource> SystemParam for Option<ResMut<'a, T>> {
     type State = ComponentId;
     type Item<'w, 's> = Option<ResMut<'w, T>>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        ResMut::<T>::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        ResMut::<T>::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        ResMut::<T>::init_access(state, system_meta, world)
     }
 
     #[inline]
@@ -967,7 +985,9 @@ unsafe impl SystemParam for &'_ World {
     type State = ();
     type Item<'w, 's> = &'w World;
 
-    fn init_state(_world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, system_meta: &mut SystemMeta, _world: &mut World) {
         let mut access = Access::default();
         access.read_all();
         if !system_meta
@@ -1008,7 +1028,9 @@ unsafe impl<'w> SystemParam for DeferredWorld<'w> {
     type State = ();
     type Item<'world, 'state> = DeferredWorld<'world>;
 
-    fn init_state(_world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, system_meta: &mut SystemMeta, _world: &mut World) {
         system_meta.component_access_set.read_all();
         system_meta.component_access_set.write_all();
         system_meta.set_has_deferred();
@@ -1122,9 +1144,11 @@ unsafe impl<'a, T: FromWorld + Send + 'static> SystemParam for Local<'a, T> {
     type State = SyncCell<T>;
     type Item<'w, 's> = Local<'s, T>;
 
-    fn init_state(world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(world: &mut World) -> Self::State {
         SyncCell::new(T::from_world(world))
     }
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
@@ -1302,9 +1326,12 @@ unsafe impl<T: SystemBuffer> SystemParam for Deferred<'_, T> {
     type State = SyncCell<T>;
     type Item<'w, 's> = Deferred<'s, T>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        system_meta.set_has_deferred();
+    fn init_state(world: &mut World) -> Self::State {
         SyncCell::new(T::from_world(world))
+    }
+
+    fn init_access(_state: &Self::State, system_meta: &mut SystemMeta, _world: &mut World) {
+        system_meta.set_has_deferred();
     }
 
     fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
@@ -1405,10 +1432,13 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
     type State = ComponentId;
     type Item<'w, 's> = NonSend<'w, T>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(world: &mut World) -> Self::State {
+        world.components.register_non_send::<T>()
+    }
+
+    fn init_access(&component_id: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
         system_meta.set_non_send();
 
-        let component_id = world.components.register_non_send::<T>();
         let archetype_component_id = world.initialize_non_send_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
@@ -1416,7 +1446,7 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
             !combined_access.has_resource_write(component_id),
             "error[B0002]: NonSend<{}> in system {} conflicts with a previous mutable resource access ({0}). Consider removing the duplicate access. See: https://bevyengine.org/learn/errors/b0002",
             core::any::type_name::<T>(),
-            system_meta.name,
+            system_meta.name(),
         );
         system_meta
             .component_access_set
@@ -1425,8 +1455,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
         system_meta
             .archetype_component_access
             .add_resource_read(archetype_component_id);
-
-        component_id
     }
 
     #[inline]
@@ -1483,8 +1511,12 @@ unsafe impl<T: 'static> SystemParam for Option<NonSend<'_, T>> {
     type State = ComponentId;
     type Item<'w, 's> = Option<NonSend<'w, T>>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        NonSend::<T>::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        NonSend::<T>::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        NonSend::<T>::init_access(state, system_meta, world);
     }
 
     #[inline]
@@ -1513,21 +1545,24 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
     type State = ComponentId;
     type Item<'w, 's> = NonSendMut<'w, T>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(world: &mut World) -> Self::State {
+        world.components.register_non_send::<T>()
+    }
+
+    fn init_access(&component_id: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
         system_meta.set_non_send();
 
-        let component_id = world.components.register_non_send::<T>();
         let archetype_component_id = world.initialize_non_send_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
         if combined_access.has_component_write(component_id) {
             panic!(
                 "error[B0002]: NonSendMut<{}> in system {} conflicts with a previous mutable resource access ({0}). Consider removing the duplicate access. See: https://bevyengine.org/learn/errors/b0002",
-                core::any::type_name::<T>(), system_meta.name);
+                core::any::type_name::<T>(), system_meta.name());
         } else if combined_access.has_component_read(component_id) {
             panic!(
                 "error[B0002]: NonSendMut<{}> in system {} conflicts with a previous immutable resource access ({0}). Consider removing the duplicate access. See: https://bevyengine.org/learn/errors/b0002",
-                core::any::type_name::<T>(), system_meta.name);
+                core::any::type_name::<T>(), system_meta.name());
         }
         system_meta
             .component_access_set
@@ -1536,8 +1571,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
         system_meta
             .archetype_component_access
             .add_resource_write(archetype_component_id);
-
-        component_id
     }
 
     #[inline]
@@ -1588,8 +1621,12 @@ unsafe impl<'a, T: 'static> SystemParam for Option<NonSendMut<'a, T>> {
     type State = ComponentId;
     type Item<'w, 's> = Option<NonSendMut<'w, T>>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        NonSendMut::<T>::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        NonSendMut::<T>::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        NonSendMut::<T>::init_access(state, system_meta, world);
     }
 
     #[inline]
@@ -1618,7 +1655,9 @@ unsafe impl<'a> SystemParam for &'a Archetypes {
     type State = ();
     type Item<'w, 's> = &'w Archetypes;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
@@ -1639,7 +1678,9 @@ unsafe impl<'a> SystemParam for &'a Components {
     type State = ();
     type Item<'w, 's> = &'w Components;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
@@ -1660,7 +1701,9 @@ unsafe impl<'a> SystemParam for &'a Entities {
     type State = ();
     type Item<'w, 's> = &'w Entities;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
@@ -1681,7 +1724,9 @@ unsafe impl<'a> SystemParam for &'a Bundles {
     type State = ();
     type Item<'w, 's> = &'w Bundles;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
@@ -1731,7 +1776,9 @@ unsafe impl SystemParam for SystemChangeTick {
     type State = ();
     type Item<'w, 's> = SystemChangeTick;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'w, 's>(
@@ -1755,8 +1802,14 @@ unsafe impl<T: SystemParam> SystemParam for Vec<T> {
 
     type Item<'world, 'state> = Vec<T::Item<'world, 'state>>;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {
         Vec::new()
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        for state in state {
+            T::init_access(state, system_meta, world);
+        }
     }
 
     #[inline]
@@ -1818,8 +1871,37 @@ unsafe impl<T: SystemParam> SystemParam for ParamSet<'_, '_, Vec<T>> {
 
     type Item<'world, 'state> = ParamSet<'world, 'state, Vec<T>>;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {
         Vec::new()
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        let metas = state
+            .iter()
+            .map(|state| {
+                // Pretend to add each param to the system alone, see if it conflicts
+                let mut meta = system_meta.clone();
+                meta.component_access_set.clear();
+                meta.archetype_component_access.clear();
+                // Call `init_access` on an empty meta to gather the new access
+                T::init_access(state, &mut meta, world);
+                // Call it again on a clone of the original meta to check for conflicts
+                T::init_access(state, &mut system_meta.clone(), world);
+                meta
+            })
+            .collect::<Vec<_>>();
+
+        for meta in metas {
+            if !meta.is_send() {
+                system_meta.set_non_send();
+            }
+            system_meta
+                .component_access_set
+                .extend(meta.component_access_set);
+            system_meta
+                .archetype_component_access
+                .extend(&meta.archetype_component_access);
+        }
     }
 
     #[inline]
@@ -1908,8 +1990,13 @@ macro_rules! impl_system_param_tuple {
             type Item<'w, 's> = ($($param::Item::<'w, 's>,)*);
 
             #[inline]
-            fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
-                (($($param::init_state(_world, _system_meta),)*))
+            fn init_state(_world: &mut World) -> Self::State {
+                (($($param::init_state(_world),)*))
+            }
+
+            fn init_access(state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {
+                let ($($param,)*) = state;
+                $($param::init_access($param, _system_meta, _world);)*
             }
 
             #[inline]
@@ -2074,8 +2161,12 @@ unsafe impl<P: SystemParam + 'static> SystemParam for StaticSystemParam<'_, '_, 
     type State = P::State;
     type Item<'world, 'state> = StaticSystemParam<'world, 'state, P>;
 
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        P::init_state(world, system_meta)
+    fn init_state(world: &mut World) -> Self::State {
+        P::init_state(world)
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        P::init_access(state, system_meta, world);
     }
 
     unsafe fn new_archetype(
@@ -2121,7 +2212,9 @@ unsafe impl<T: ?Sized> SystemParam for PhantomData<T> {
     type State = ();
     type Item<'world, 'state> = Self;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {}
+    fn init_state(_world: &mut World) -> Self::State {}
+
+    fn init_access(_state: &Self::State, _system_meta: &mut SystemMeta, _world: &mut World) {}
 
     #[inline]
     unsafe fn get_param<'world, 'state>(
@@ -2342,6 +2435,8 @@ trait DynParamState: Sync + Send {
     /// Queues any deferred mutations to be applied at the next [`apply_deferred`](crate::prelude::apply_deferred).
     fn queue(&mut self, system_meta: &SystemMeta, world: DeferredWorld);
 
+    fn init_access(&self, system_meta: &mut SystemMeta, world: &mut World);
+
     /// Refer to [`SystemParam::validate_param`].
     ///
     /// # Safety
@@ -2370,6 +2465,10 @@ impl<T: SystemParam + 'static> DynParamState for ParamState<T> {
         T::queue(&mut self.0, system_meta, world);
     }
 
+    fn init_access(&self, system_meta: &mut SystemMeta, world: &mut World) {
+        T::init_access(&self.0, system_meta, world);
+    }
+
     unsafe fn validate_param(&self, system_meta: &SystemMeta, world: UnsafeWorldCell) -> bool {
         T::validate_param(&self.0, system_meta, world)
     }
@@ -2381,8 +2480,12 @@ unsafe impl SystemParam for DynSystemParam<'_, '_> {
 
     type Item<'world, 'state> = DynSystemParam<'world, 'state>;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {
         DynSystemParamState::new::<()>(())
+    }
+
+    fn init_access(state: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        state.0.init_access(system_meta, world);
     }
 
     #[inline]
@@ -2442,8 +2545,36 @@ unsafe impl SystemParam for FilteredResources<'_, '_> {
 
     type Item<'world, 'state> = FilteredResources<'world, 'state>;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {
         Access::new()
+    }
+
+    fn init_access(access: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        let combined_access = system_meta.component_access_set.combined_access();
+        let conflicts = combined_access.get_conflicts(access);
+        if !conflicts.is_empty() {
+            let accesses = conflicts.format_conflict_list(world);
+            let system_name = system_meta.name();
+            panic!("error[B0002]: FilteredResources in system {system_name} accesses resources(s){accesses} in a way that conflicts with a previous system parameter. Consider removing the duplicate access. See: https://bevyengine.org/learn/errors/b0002");
+        }
+
+        if access.has_read_all_resources() {
+            system_meta
+                .component_access_set
+                .add_unfiltered_read_all_resources();
+            system_meta.archetype_component_access.read_all_resources();
+        } else {
+            for component_id in access.resource_reads_and_writes() {
+                system_meta
+                    .component_access_set
+                    .add_unfiltered_resource_read(component_id);
+
+                let archetype_component_id = world.initialize_resource_internal(component_id).id();
+                system_meta
+                    .archetype_component_access
+                    .add_resource_read(archetype_component_id);
+            }
+        }
     }
 
     unsafe fn get_param<'world, 'state>(
@@ -2469,8 +2600,54 @@ unsafe impl SystemParam for FilteredResourcesMut<'_, '_> {
 
     type Item<'world, 'state> = FilteredResourcesMut<'world, 'state>;
 
-    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+    fn init_state(_world: &mut World) -> Self::State {
         Access::new()
+    }
+
+    fn init_access(access: &Self::State, system_meta: &mut SystemMeta, world: &mut World) {
+        let combined_access = system_meta.component_access_set.combined_access();
+        let conflicts = combined_access.get_conflicts(&access);
+        if !conflicts.is_empty() {
+            let accesses = conflicts.format_conflict_list(world);
+            let system_name = system_meta.name();
+            panic!("error[B0002]: FilteredResourcesMut in system {system_name} accesses resources(s){accesses} in a way that conflicts with a previous system parameter. Consider removing the duplicate access. See: https://bevyengine.org/learn/errors/b0002");
+        }
+
+        if access.has_read_all_resources() {
+            system_meta
+                .component_access_set
+                .add_unfiltered_read_all_resources();
+            system_meta.archetype_component_access.read_all_resources();
+        } else {
+            for component_id in access.resource_reads() {
+                system_meta
+                    .component_access_set
+                    .add_unfiltered_resource_read(component_id);
+
+                let archetype_component_id = world.initialize_resource_internal(component_id).id();
+                system_meta
+                    .archetype_component_access
+                    .add_resource_read(archetype_component_id);
+            }
+        }
+
+        if access.has_write_all_resources() {
+            system_meta
+                .component_access_set
+                .add_unfiltered_write_all_resources();
+            system_meta.archetype_component_access.write_all_resources();
+        } else {
+            for component_id in access.resource_writes() {
+                system_meta
+                    .component_access_set
+                    .add_unfiltered_resource_write(component_id);
+
+                let archetype_component_id = world.initialize_resource_internal(component_id).id();
+                system_meta
+                    .archetype_component_access
+                    .add_resource_write(archetype_component_id);
+            }
+        }
     }
 
     unsafe fn get_param<'world, 'state>(

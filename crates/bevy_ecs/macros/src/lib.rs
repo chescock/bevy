@@ -341,16 +341,26 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                 type Item<'w, 's> = ParamSet<'w, 's, (#(#param,)*)>;
 
                 // Note: We allow non snake case so the compiler don't complain about the creation of non_snake_case variables
+                fn init_state(world: &mut World) -> Self::State {
+                    (#(#param::init_state(world),)*)
+                }
+
                 #[allow(non_snake_case)]
-                fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+                fn init_access(
+                    state: &Self::State,
+                    system_meta: &mut SystemMeta,
+                    world: &mut World,
+                ) {
+                    let (#(#param,)*) = state;
                     #(
                         // Pretend to add each param to the system alone, see if it conflicts
                         let mut #meta = system_meta.clone();
                         #meta.component_access_set.clear();
                         #meta.archetype_component_access.clear();
-                        #param::init_state(world, &mut #meta);
-                        // The variable is being defined with non_snake_case here
-                        let #param = #param::init_state(world, &mut system_meta.clone());
+                        // Call `init_access` on an empty meta to gather the new access
+                        #param::init_access(#param, &mut #meta, world );
+                        // Call it again on a clone of the original meta to check for conflicts
+                        #param::init_access(#param, &mut system_meta.clone(), world );
                     )*
                     // Make the ParamSet non-send if any of its parameters are non-send.
                     if false #(|| !#meta.is_send())* {
@@ -364,7 +374,6 @@ pub fn impl_param_set(_input: TokenStream) -> TokenStream {
                             .archetype_component_access
                             .extend(&#meta.archetype_component_access);
                     )*
-                    (#(#param,)*)
                 }
 
                 unsafe fn new_archetype(state: &mut Self::State, archetype: &Archetype, system_meta: &mut SystemMeta) {
@@ -579,10 +588,10 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
             > #path::system::SystemParamBuilder<#generic_struct> for #builder_name<#(#builder_type_parameters,)*>
                 #where_clause
             {
-                fn build(self, world: &mut #path::world::World, meta: &mut #path::system::SystemMeta) -> <#generic_struct as #path::system::SystemParam>::State {
+                fn build(self, world: &mut #path::world::World) -> <#generic_struct as #path::system::SystemParam>::State {
                     let #builder_name { #(#fields: #field_locals,)* } = self;
                     #state_struct_name {
-                        state: #path::system::SystemParamBuilder::build((#(#tuple_patterns,)*), world, meta)
+                        state: #path::system::SystemParamBuilder::build((#(#tuple_patterns,)*), world)
                     }
                 }
             }
@@ -611,10 +620,14 @@ pub fn derive_system_param(input: TokenStream) -> TokenStream {
                 type State = #state_struct_name<#punctuated_generic_idents>;
                 type Item<'w, 's> = #struct_name #ty_generics;
 
-                fn init_state(world: &mut #path::world::World, system_meta: &mut #path::system::SystemMeta) -> Self::State {
+                fn init_state(world: &mut #path::world::World) -> Self::State {
                     #state_struct_name {
-                        state: <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::init_state(world, system_meta),
+                        state: <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::init_state(world),
                     }
+                }
+
+                fn init_access(state: &Self::State, system_meta: &mut #path::system::SystemMeta, world: &mut #path::world::World) {
+                    <#fields_alias::<'_, '_, #punctuated_generic_idents> as #path::system::SystemParam>::init_access(&state.state, system_meta, world);
                 }
 
                 unsafe fn new_archetype(state: &mut Self::State, archetype: &#path::archetype::Archetype, system_meta: &mut #path::system::SystemMeta) {

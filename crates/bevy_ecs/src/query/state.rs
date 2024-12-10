@@ -171,30 +171,11 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         Some(state)
     }
 
-    /// Identical to `new`, but it populates the provided `access` with the matched results.
-    pub(crate) fn new_with_access(
-        world: &mut World,
-        access: &mut Access<ArchetypeComponentId>,
-    ) -> Self {
-        let mut state = Self::new_uninitialized(world);
-        for archetype in world.archetypes.iter() {
-            // SAFETY: The state was just initialized from the `world` above, and the archetypes being added
-            // come directly from the same world.
-            unsafe {
-                if state.new_archetype_internal(archetype) {
-                    state.update_archetype_component_access(archetype, access);
-                }
-            }
-        }
-        state.archetype_generation = world.archetypes.generation();
-        state
-    }
-
     /// Creates a new [`QueryState`] but does not populate it with the matched results from the World yet
     ///
     /// `new_archetype` and its variants must be called on all of the World's archetypes before the
     /// state can return valid query results.
-    fn new_uninitialized(world: &mut World) -> Self {
+    pub fn new_uninitialized(world: &mut World) -> Self {
         let fetch_state = D::init_state(world);
         let filter_state = F::init_state(world);
         Self::from_states_uninitialized(world.id(), fetch_state, filter_state)
