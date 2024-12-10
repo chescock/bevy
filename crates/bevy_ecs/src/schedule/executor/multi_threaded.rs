@@ -18,7 +18,7 @@ use crate::{
     prelude::Resource,
     query::Access,
     schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
-    system::RunnableBoxedSystem,
+    system::{BoxedSystem, RunnableSystemMeta},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -29,12 +29,14 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
-    systems: &'sys [SyncUnsafeCell<RunnableBoxedSystem>],
+    systems: &'sys [SyncUnsafeCell<BoxedSystem>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
 }
 
 struct Conditions<'a> {
+    system_metas: &'a mut [RunnableSystemMeta],
+    system_dependents: &'a [Vec<usize>],
     system_conditions: &'a mut [Vec<BoxedCondition>],
     set_conditions: &'a mut [Vec<BoxedCondition>],
     sets_with_conditions_of_systems: &'a [FixedBitSet],
@@ -51,6 +53,8 @@ impl<'env, 'sys> Environment<'env, 'sys> {
             executor,
             systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
             conditions: SyncUnsafeCell::new(Conditions {
+                system_metas: &mut schedule.system_metas,
+                system_dependents: &schedule.system_dependents,
                 system_conditions: &mut schedule.system_conditions,
                 set_conditions: &mut schedule.set_conditions,
                 sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
@@ -59,19 +63,6 @@ impl<'env, 'sys> Environment<'env, 'sys> {
             world_cell: world.as_unsafe_world_cell(),
         }
     }
-}
-
-/// Per-system data used by the [`MultiThreadedExecutor`].
-// Copied here because it can't be read from the system when it's running.
-struct SystemTaskMetadata {
-    /// The [`ArchetypeComponentId`] access of the system.
-    archetype_component_access: Access<ArchetypeComponentId>,
-    /// Indices of the systems that directly depend on the system.
-    dependents: Vec<usize>,
-    /// Is `true` if the system does not access `!Send` data.
-    is_send: bool,
-    /// Is `true` if the system is exclusive.
-    is_exclusive: bool,
 }
 
 /// The result of running a system that is sent across a channel.
@@ -97,8 +88,6 @@ pub struct MultiThreadedExecutor {
 
 /// The state of the executor while running.
 pub struct ExecutorState {
-    /// Metadata for scheduling and running system tasks.
-    system_task_metadata: Vec<SystemTaskMetadata>,
     /// Union of the accesses of all currently running systems.
     active_access: Access<ArchetypeComponentId>,
     /// Returns `true` if a system with non-`Send` access is running.
@@ -162,14 +151,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         state.skipped_systems = FixedBitSet::with_capacity(sys_count);
         state.unapplied_systems = FixedBitSet::with_capacity(sys_count);
 
-        state.system_task_metadata = Vec::with_capacity(sys_count);
         for index in 0..sys_count {
-            state.system_task_metadata.push(SystemTaskMetadata {
-                archetype_component_access: default(),
-                dependents: schedule.system_dependents[index].clone(),
-                is_send: schedule.systems[index].is_send(),
-                is_exclusive: schedule.systems[index].is_exclusive(),
-            });
             if schedule.system_dependencies[index] == 0 {
                 self.starting_systems.insert(index);
             }
@@ -206,7 +188,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             // signal the dependencies for each of the skipped systems, as
             // though they had run
             for system_index in skipped_systems.ones() {
-                state.signal_dependents(system_index);
+                state.signal_dependents(system_index, context);
                 state.ready_systems.remove(system_index);
             }
         }
@@ -269,7 +251,7 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         &self,
         system_index: usize,
         res: Result<(), Box<dyn Any + Send>>,
-        system: &RunnableBoxedSystem,
+        system: &BoxedSystem,
     ) {
         // tell the executor that the system finished
         self.environment
@@ -336,7 +318,6 @@ impl MultiThreadedExecutor {
 impl ExecutorState {
     fn new() -> Self {
         Self {
-            system_task_metadata: Vec::new(),
             num_running_systems: 0,
             num_dependencies_remaining: Vec::new(),
             active_access: default(),
@@ -357,10 +338,10 @@ impl ExecutorState {
         let _span = context.environment.executor.executor_span.enter();
 
         for result in context.environment.executor.system_completion.try_iter() {
-            self.finish_system_and_handle_dependents(result);
+            self.finish_system_and_handle_dependents(result, conditions);
         }
 
-        self.rebuild_active_access();
+        self.rebuild_active_access(conditions);
 
         // SAFETY:
         // - `finish_system_and_handle_dependents` has updated the currently running systems.
@@ -423,7 +404,7 @@ impl ExecutorState {
                         context.environment.world_cell,
                     )
                 } {
-                    self.skip_system_and_signal_dependents(system_index);
+                    self.skip_system_and_signal_dependents(system_index, conditions);
                     // signal_dependents may have set more systems to ready.
                     check_for_new_ready_systems = true;
                     continue;
@@ -432,7 +413,7 @@ impl ExecutorState {
                 self.running_systems.insert(system_index);
                 self.num_running_systems += 1;
 
-                if self.system_task_metadata[system_index].is_exclusive {
+                if conditions.system_metas[system_index].is_exclusive() {
                     // SAFETY: `can_run` returned true for this system,
                     // which means no systems are currently borrowed.
                     unsafe {
@@ -447,7 +428,7 @@ impl ExecutorState {
                 // - `can_run` has been called, which calls `update_archetype_component_access` with this system.
                 // - `can_run` returned true, so no systems with conflicting world access are running.
                 unsafe {
-                    self.spawn_system_task(context, system_index);
+                    self.spawn_system_task(context, conditions, system_index);
                 }
             }
         }
@@ -459,16 +440,16 @@ impl ExecutorState {
     fn can_run(
         &mut self,
         system_index: usize,
-        system: &mut RunnableBoxedSystem,
+        system: &mut BoxedSystem,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
-        let system_meta = &self.system_task_metadata[system_index];
-        if system_meta.is_exclusive && self.num_running_systems > 0 {
+        let system_meta = &mut conditions.system_metas[system_index];
+        if system_meta.is_exclusive() && self.num_running_systems > 0 {
             return false;
         }
 
-        if !system_meta.is_send && self.local_thread_running {
+        if !system_meta.is_send() && self.local_thread_running {
             return false;
         }
 
@@ -498,17 +479,13 @@ impl ExecutorState {
         }
 
         if !self.skipped_systems.contains(system_index) {
-            system.update_archetype_component_access(world);
-            if !system
+            system.update_archetype_component_access(world, system_meta);
+            if !system_meta
                 .archetype_component_access()
                 .is_compatible(&self.active_access)
             {
                 return false;
             }
-
-            self.system_task_metadata[system_index]
-                .archetype_component_access
-                .clone_from(system.archetype_component_access());
         }
 
         true
@@ -523,7 +500,7 @@ impl ExecutorState {
     unsafe fn should_run(
         &mut self,
         system_index: usize,
-        system: &mut RunnableBoxedSystem,
+        system: &mut BoxedSystem,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
@@ -572,7 +549,7 @@ impl ExecutorState {
             // - The caller ensures that `world` has permission to read any data
             //   required by the system.
             // - `update_archetype_component_access` has been called for system.
-            let valid_params = unsafe { system.system_mut().validate_param_unsafe(world) };
+            let valid_params = unsafe { system.validate_param_unsafe(world) };
             if !valid_params {
                 self.skipped_systems.insert(system_index);
             }
@@ -588,13 +565,16 @@ impl ExecutorState {
     ///   used by the specified system.
     /// - `update_archetype_component_access` must have been called with `world`
     ///   on the system associated with `system_index`.
-    unsafe fn spawn_system_task(&mut self, context: &Context, system_index: usize) {
+    unsafe fn spawn_system_task(
+        &mut self,
+        context: &Context,
+        conditions: &mut Conditions,
+        system_index: usize,
+    ) {
         // SAFETY: this system is not running, no other reference exists
         let system = unsafe { &mut *context.environment.systems[system_index].get() };
         // Move the full context object into the new future.
         let context = *context;
-
-        let system_meta = &self.system_task_metadata[system_index];
 
         let task = async move {
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -612,10 +592,11 @@ impl ExecutorState {
             context.system_completed(system_index, res, system);
         };
 
+        let system_meta = &mut conditions.system_metas[system_index];
         self.active_access
-            .extend(&system_meta.archetype_component_access);
+            .extend(&system_meta.archetype_component_access());
 
-        if system_meta.is_send {
+        if system_meta.is_send() {
             context.scope.spawn(task);
         } else {
             self.local_thread_running = true;
@@ -648,9 +629,11 @@ impl ExecutorState {
             let task = async move {
                 // SAFETY: `can_run` returned true for this system, which means
                 // that no other systems currently have access to the world.
-                let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    __rust_begin_short_backtrace::run(&mut **system, world);
+                    __rust_begin_short_backtrace::run_unsafe(
+                        &mut **system,
+                        context.environment.world_cell,
+                    );
                 }));
                 context.system_completed(system_index, res, system);
             };
@@ -662,14 +645,19 @@ impl ExecutorState {
         self.local_thread_running = true;
     }
 
-    fn finish_system_and_handle_dependents(&mut self, result: SystemResult) {
+    fn finish_system_and_handle_dependents(
+        &mut self,
+        result: SystemResult,
+        conditions: &mut Conditions,
+    ) {
         let SystemResult { system_index, .. } = result;
 
-        if self.system_task_metadata[system_index].is_exclusive {
+        let system_meta = &conditions.system_metas[system_index];
+        if system_meta.is_exclusive() {
             self.exclusive_running = false;
         }
 
-        if !self.system_task_metadata[system_index].is_send {
+        if !system_meta.is_send() {
             self.local_thread_running = false;
         }
 
@@ -679,16 +667,20 @@ impl ExecutorState {
         self.completed_systems.insert(system_index);
         self.unapplied_systems.insert(system_index);
 
-        self.signal_dependents(system_index);
+        self.signal_dependents(system_index, conditions);
     }
 
-    fn skip_system_and_signal_dependents(&mut self, system_index: usize) {
+    fn skip_system_and_signal_dependents(
+        &mut self,
+        system_index: usize,
+        conditions: &mut Conditions,
+    ) {
         self.completed_systems.insert(system_index);
-        self.signal_dependents(system_index);
+        self.signal_dependents(system_index, conditions);
     }
 
-    fn signal_dependents(&mut self, system_index: usize) {
-        for &dep_idx in &self.system_task_metadata[system_index].dependents {
+    fn signal_dependents(&mut self, system_index: usize, conditions: &mut Conditions) {
+        for &dep_idx in &conditions.system_dependents[system_index] {
             let remaining = &mut self.num_dependencies_remaining[dep_idx];
             debug_assert!(*remaining >= 1);
             *remaining -= 1;
@@ -698,26 +690,26 @@ impl ExecutorState {
         }
     }
 
-    fn rebuild_active_access(&mut self) {
+    fn rebuild_active_access(&mut self, conditions: &mut Conditions) {
         self.active_access.clear();
         for index in self.running_systems.ones() {
-            let system_meta = &self.system_task_metadata[index];
+            let system_meta = &conditions.system_metas[index];
             self.active_access
-                .extend(&system_meta.archetype_component_access);
+                .extend(&system_meta.archetype_component_access());
         }
     }
 }
 
 fn apply_deferred(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<RunnableBoxedSystem>],
+    systems: &[SyncUnsafeCell<BoxedSystem>],
     world: &mut World,
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {
         // SAFETY: none of these systems are running, no other references exist
         let system = unsafe { &mut *systems[system_index].get() };
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            system.system_mut().apply_deferred(world);
+            system.apply_deferred(world);
         }));
         if let Err(payload) = res {
             eprintln!(

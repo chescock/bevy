@@ -18,7 +18,7 @@ use crate::{
     component::{ComponentId, Components, Tick},
     prelude::Component,
     schedule::*,
-    system::{Resource, RunnableBoxedSystem, RunnableSystem, System},
+    system::{BoxedSystem, IntoSystem, Resource, RunnableSystemMeta, System},
     world::World,
 };
 
@@ -448,7 +448,7 @@ impl Schedule {
     pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
         for system in &mut self.executable.systems {
             if !is_apply_deferred(system) {
-                system.system_mut().check_change_tick(change_tick);
+                system.check_change_tick(change_tick);
             }
         }
 
@@ -475,7 +475,7 @@ impl Schedule {
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
         for system in &mut self.executable.systems {
-            system.system_mut().apply_deferred(world);
+            system.apply_deferred(world);
         }
     }
 
@@ -485,8 +485,7 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (NodeId, &RunnableBoxedSystem)> + Sized, ScheduleNotInitialized>
-    {
+    ) -> Result<impl Iterator<Item = (NodeId, &BoxedSystem)> + Sized, ScheduleNotInitialized> {
         if !self.executor_initialized {
             return Err(ScheduleNotInitialized);
         }
@@ -566,21 +565,21 @@ impl SystemSetNode {
 
 /// A [`BoxedSystem`] with metadata, stored in a [`ScheduleGraph`].
 struct SystemNode {
-    inner: Option<RunnableBoxedSystem>,
+    inner: Option<BoxedSystem>,
 }
 
 impl SystemNode {
-    pub fn new(system: RunnableBoxedSystem) -> Self {
+    pub fn new(system: BoxedSystem) -> Self {
         Self {
             inner: Some(system),
         }
     }
 
-    pub fn get(&self) -> Option<&RunnableBoxedSystem> {
+    pub fn get(&self) -> Option<&BoxedSystem> {
         self.inner.as_ref()
     }
 
-    pub fn get_mut(&mut self) -> Option<&mut RunnableBoxedSystem> {
+    pub fn get_mut(&mut self) -> Option<&mut BoxedSystem> {
         self.inner.as_mut()
     }
 }
@@ -593,6 +592,7 @@ impl SystemNode {
 pub struct ScheduleGraph {
     /// List of systems in the schedule
     systems: Vec<SystemNode>,
+    system_metas: Vec<RunnableSystemMeta>,
     /// List of conditions for each system, in the same order as `systems`
     system_conditions: Vec<Vec<BoxedCondition>>,
     /// List of system sets in the schedule
@@ -624,6 +624,7 @@ impl ScheduleGraph {
     pub fn new() -> Self {
         Self {
             systems: Vec::new(),
+            system_metas: Vec::new(),
             system_conditions: Vec::new(),
             system_sets: Vec::new(),
             system_set_conditions: Vec::new(),
@@ -643,10 +644,7 @@ impl ScheduleGraph {
     }
 
     /// Returns the system at the given [`NodeId`], if it exists.
-    pub fn get_system_at(
-        &self,
-        id: NodeId,
-    ) -> Option<&RunnableSystem<dyn System<In = (), Out = ()>>> {
+    pub fn get_system_at(&self, id: NodeId) -> Option<&dyn System<In = (), Out = ()>> {
         if !id.is_system() {
             return None;
         }
@@ -664,7 +662,7 @@ impl ScheduleGraph {
     ///
     /// Panics if it doesn't exist.
     #[track_caller]
-    pub fn system_at(&self, id: NodeId) -> &RunnableSystem<dyn System<In = (), Out = ()>> {
+    pub fn system_at(&self, id: NodeId) -> &dyn System<In = (), Out = ()> {
         self.get_system_at(id)
             .ok_or_else(|| format!("system with id {id:?} does not exist in this Schedule"))
             .unwrap()
@@ -691,13 +689,7 @@ impl ScheduleGraph {
     /// Returns an iterator over all systems in this schedule, along with the conditions for each system.
     pub fn systems(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            NodeId,
-            &RunnableSystem<dyn System<In = (), Out = ()>>,
-            &[BoxedCondition],
-        ),
-    > {
+    ) -> impl Iterator<Item = (NodeId, &dyn System<In = (), Out = ()>, &[BoxedCondition])> {
         self.systems
             .iter()
             .zip(self.system_conditions.iter())
@@ -879,6 +871,7 @@ impl ScheduleGraph {
         // system init has to be deferred (need `&mut World`)
         self.uninit.push((id, 0));
         self.systems.push(SystemNode::new(config.node));
+        self.system_metas.push(RunnableSystemMeta::new());
         self.system_conditions.push(config.conditions);
 
         Ok(id)
@@ -1065,7 +1058,8 @@ impl ScheduleGraph {
         for (id, i) in self.uninit.drain(..) {
             match id {
                 NodeId::System(index) => {
-                    self.systems[index].get_mut().unwrap().initialize(world);
+                    let system_meta = self.systems[index].get_mut().unwrap().initialize(world);
+                    self.system_metas[index] = system_meta;
                     for condition in &mut self.system_conditions[index] {
                         condition.initialize(world);
                         assert!(
@@ -1176,7 +1170,7 @@ impl ScheduleGraph {
         // use the same sync point if the distance is the same
         let mut distances: HashMap<usize, Option<u32>> = HashMap::with_capacity(topo.len());
         for node in &topo {
-            let add_sync_after = self.systems[node.index()].get().unwrap().has_deferred();
+            let add_sync_after = self.system_metas[node.index()].has_deferred();
 
             for target in dependency_flattened.neighbors_directed(*node, Outgoing) {
                 let add_sync_on_edge = add_sync_after
@@ -1215,9 +1209,14 @@ impl ScheduleGraph {
     fn add_auto_sync(&mut self) -> NodeId {
         let id = NodeId::System(self.systems.len());
 
-        let mut system = RunnableSystem::new_boxed(apply_deferred);
-        system.initialize_as_exclusive();
-        self.systems.push(SystemNode::new(system));
+        self.systems
+            .push(SystemNode::new(Box::new(IntoSystem::into_system(
+                apply_deferred,
+            ))));
+        let mut system_meta = RunnableSystemMeta::new();
+        system_meta.set_non_send();
+        system_meta.set_is_exclusive();
+        self.system_metas.push(system_meta);
         self.system_conditions.push(Vec::new());
 
         // ignore ambiguities with auto sync points
@@ -1374,8 +1373,8 @@ impl ScheduleGraph {
                 continue;
             }
 
-            let system_a = self.systems[a.index()].get().unwrap();
-            let system_b = self.systems[b.index()].get().unwrap();
+            let system_a = &self.system_metas[a.index()];
+            let system_b = &self.system_metas[b.index()];
             if system_a.is_exclusive() || system_b.is_exclusive() {
                 conflicting_systems.push((a, b, Vec::new()));
             } else {
@@ -1495,6 +1494,7 @@ impl ScheduleGraph {
 
         SystemSchedule {
             systems: Vec::with_capacity(sys_count),
+            system_metas: Vec::with_capacity(sys_count),
             system_conditions: Vec::with_capacity(sys_count),
             set_conditions: Vec::with_capacity(set_with_conditions_count),
             system_ids: dg_system_ids,
@@ -1519,14 +1519,16 @@ impl ScheduleGraph {
         }
 
         // move systems out of old schedule
-        for ((id, system), conditions) in schedule
+        for (((id, system), conditions), meta) in schedule
             .system_ids
             .drain(..)
             .zip(schedule.systems.drain(..))
             .zip(schedule.system_conditions.drain(..))
+            .zip(schedule.system_metas.drain(..))
         {
             self.systems[id.index()].inner = Some(system);
             self.system_conditions[id.index()] = conditions;
+            self.system_metas[id.index()] = meta;
         }
 
         for (id, conditions) in schedule
@@ -1543,8 +1545,10 @@ impl ScheduleGraph {
         for &id in &schedule.system_ids {
             let system = self.systems[id.index()].inner.take().unwrap();
             let conditions = core::mem::take(&mut self.system_conditions[id.index()]);
+            let meta = core::mem::take(&mut self.system_metas[id.index()]);
             schedule.systems.push(system);
             schedule.system_conditions.push(conditions);
+            schedule.system_metas.push(meta);
         }
 
         for &id in &schedule.set_ids {
@@ -1573,7 +1577,7 @@ trait ProcessNodeConfig: Sized {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: NodeConfig<Self>) -> NodeId;
 }
 
-impl ProcessNodeConfig for RunnableBoxedSystem {
+impl ProcessNodeConfig for BoxedSystem {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: NodeConfig<Self>) -> NodeId {
         schedule_graph.add_system_inner(config).unwrap()
     }

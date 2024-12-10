@@ -12,7 +12,7 @@ use fixedbitset::FixedBitSet;
 
 use crate::{
     schedule::{BoxedCondition, NodeId},
-    system::RunnableBoxedSystem,
+    system::{BoxedSystem, RunnableSystemMeta},
     world::World,
 };
 
@@ -60,7 +60,9 @@ pub struct SystemSchedule {
     /// List of system node ids.
     pub(super) system_ids: Vec<NodeId>,
     /// Indexed by system node id.
-    pub(super) systems: Vec<RunnableBoxedSystem>,
+    pub(super) systems: Vec<BoxedSystem>,
+    /// Indexed by system node id.
+    pub(super) system_metas: Vec<RunnableSystemMeta>,
     /// Indexed by system node id.
     pub(super) system_conditions: Vec<Vec<BoxedCondition>>,
     /// Indexed by system node id.
@@ -88,6 +90,7 @@ impl SystemSchedule {
     pub const fn new() -> Self {
         Self {
             systems: Vec::new(),
+            system_metas: Vec::new(),
             system_conditions: Vec::new(),
             set_conditions: Vec::new(),
             system_ids: Vec::new(),
@@ -122,10 +125,10 @@ impl SystemSchedule {
 pub fn apply_deferred(world: &mut World) {}
 
 /// Returns `true` if the [`System`](crate::system::System) is an instance of [`apply_deferred`].
-pub(super) fn is_apply_deferred(system: &RunnableBoxedSystem) -> bool {
+pub(super) fn is_apply_deferred(system: &BoxedSystem) -> bool {
     use crate::system::IntoSystem;
     // deref to use `System::type_id` instead of `Any::type_id`
-    system.system().type_id() == apply_deferred.system_type_id()
+    system.as_ref().type_id() == apply_deferred.system_type_id()
 }
 
 /// These functions hide the bottom of the callstack from `RUST_BACKTRACE=1` (assuming the default panic handler is used).
@@ -148,7 +151,7 @@ mod __rust_begin_short_backtrace {
     /// See `System::run_unsafe`.
     #[inline(never)]
     pub(super) unsafe fn run_unsafe(
-        system: &mut RunnableSystem<dyn System<In = (), Out = ()>>,
+        system: &mut dyn System<In = (), Out = ()>,
         world: UnsafeWorldCell,
     ) {
         system.run_unsafe((), world);
@@ -163,15 +166,6 @@ mod __rust_begin_short_backtrace {
         world: UnsafeWorldCell,
     ) -> O {
         black_box(system.run_unsafe((), world))
-    }
-
-    #[inline(never)]
-    pub(super) fn run(
-        system: &mut RunnableSystem<dyn System<In = (), Out = ()>>,
-        world: &mut World,
-    ) {
-        system.run((), world);
-        black_box(());
     }
 
     #[inline(never)]

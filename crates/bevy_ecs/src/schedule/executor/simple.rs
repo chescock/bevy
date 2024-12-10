@@ -80,8 +80,14 @@ impl SystemExecutor for SimpleExecutor {
             should_run &= system_conditions_met;
 
             let system = &mut schedule.systems[system_index];
+            let system_meta = &mut schedule.system_metas[system_index];
             if should_run {
-                let valid_params = system.validate_param(world);
+                let world = world.as_unsafe_world_cell_readonly();
+                system.update_archetype_component_access(world, system_meta);
+                // SAFETY:
+                // - We have exclusive access to the entire world.
+                // - `update_archetype_component_access` has been called.
+                let valid_params = unsafe { system.validate_param_unsafe(world) };
                 should_run &= valid_params;
             }
 
@@ -100,7 +106,16 @@ impl SystemExecutor for SimpleExecutor {
             }
 
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                __rust_begin_short_backtrace::run(&mut **system, world);
+                // SAFETY:
+                // - We have exclusive access to the entire world.
+                // - `update_archetype_component_access` has been called.
+                unsafe {
+                    __rust_begin_short_backtrace::run_unsafe(
+                        &mut **system,
+                        world.as_unsafe_world_cell_readonly(),
+                    )
+                };
+                system.apply_deferred(world);
             }));
             if let Err(payload) = res {
                 eprintln!("Encountered a panic in system `{}`!", &*system.name());

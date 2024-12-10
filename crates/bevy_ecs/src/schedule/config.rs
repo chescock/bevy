@@ -7,7 +7,7 @@ use crate::{
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
         Chain,
     },
-    system::{IntoSystem, RunnableBoxedSystem, RunnableSystem},
+    system::{BoxedSystem, IntoSystem, RunnableSystem},
 };
 
 fn new_condition<M>(condition: impl Condition<M>) -> BoxedCondition {
@@ -40,7 +40,7 @@ pub struct NodeConfig<T> {
 }
 
 /// Stores configuration for a single system.
-pub type SystemConfig = NodeConfig<RunnableBoxedSystem>;
+pub type SystemConfig = NodeConfig<BoxedSystem>;
 
 /// A collections of generic [`NodeConfig`]s.
 pub enum NodeConfigs<T> {
@@ -58,12 +58,12 @@ pub enum NodeConfigs<T> {
 }
 
 /// A collection of [`SystemConfig`].
-pub type SystemConfigs = NodeConfigs<RunnableBoxedSystem>;
+pub type SystemConfigs = NodeConfigs<BoxedSystem>;
 
 impl SystemConfigs {
-    fn new_system(system: RunnableBoxedSystem) -> Self {
+    fn new_system(system: BoxedSystem) -> Self {
         // include system in its default sets
-        let sets = system.system().default_system_sets().into_iter().collect();
+        let sets = system.default_system_sets().into_iter().collect();
         Self::NodeConfig(SystemConfig {
             node: system,
             graph_info: GraphInfo {
@@ -515,11 +515,11 @@ where
     F: IntoSystem<(), (), Marker>,
 {
     fn into_configs(self) -> SystemConfigs {
-        SystemConfigs::new_system(RunnableSystem::new_boxed(self))
+        SystemConfigs::new_system(Box::new(IntoSystem::into_system(self)))
     }
 }
 
-impl IntoSystemConfigs<()> for RunnableBoxedSystem<(), ()> {
+impl IntoSystemConfigs<()> for BoxedSystem<(), ()> {
     fn into_configs(self) -> SystemConfigs {
         SystemConfigs::new_system(self)
     }

@@ -129,6 +129,10 @@ impl RunnableSystemMeta {
         Self::default()
     }
 
+    pub fn component_access(&self) -> &Access<ComponentId> {
+        self.component_access_set.combined_access()
+    }
+
     pub fn component_access_set(&self) -> &FilteredAccessSet<ComponentId> {
         &self.component_access_set
     }

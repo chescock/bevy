@@ -86,8 +86,14 @@ impl SystemExecutor for SingleThreadedExecutor {
             should_run &= system_conditions_met;
 
             let system = &mut schedule.systems[system_index];
+            let system_meta = &mut schedule.system_metas[system_index];
             if should_run {
-                let valid_params = system.validate_param(world);
+                let world = world.as_unsafe_world_cell_readonly();
+                system.update_archetype_component_access(world, system_meta);
+                // SAFETY:
+                // - We have exclusive access to the entire world.
+                // - `update_archetype_component_access` has been called.
+                let valid_params = unsafe { system.validate_param_unsafe(world) };
                 should_run &= valid_params;
             }
 
@@ -107,16 +113,10 @@ impl SystemExecutor for SingleThreadedExecutor {
             }
 
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                if system.is_exclusive() {
-                    __rust_begin_short_backtrace::run(&mut **system, world);
-                } else {
-                    // Use run_unsafe to avoid immediately applying deferred buffers
-                    let world = world.as_unsafe_world_cell();
-                    system.update_archetype_component_access(world);
-                    // SAFETY: We have exclusive, single-threaded access to the world and
-                    // update_archetype_component_access is being called immediately before this.
-                    unsafe { __rust_begin_short_backtrace::run_unsafe(&mut **system, world) };
-                }
+                let world = world.as_unsafe_world_cell();
+                // SAFETY: We have exclusive, single-threaded access to the world and
+                // update_archetype_component_access is being called immediately before this.
+                unsafe { __rust_begin_short_backtrace::run_unsafe(&mut **system, world) };
             }));
             if let Err(payload) = res {
                 eprintln!("Encountered a panic in system `{}`!", &*system.name());
@@ -153,7 +153,7 @@ impl SingleThreadedExecutor {
     fn apply_deferred(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
         for system_index in self.unapplied_systems.ones() {
             let system = &mut schedule.systems[system_index];
-            system.system_mut().apply_deferred(world);
+            system.apply_deferred(world);
         }
 
         self.unapplied_systems.clear();

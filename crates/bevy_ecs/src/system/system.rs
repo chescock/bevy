@@ -205,12 +205,6 @@ impl<S: System + ?Sized> RunnableSystem<S> {
         self.runnable_system_meta = self.system.initialize(world);
     }
 
-    // TODO: Note that this is for apply_deferred
-    pub(crate) fn initialize_as_exclusive(&mut self) {
-        self.runnable_system_meta.set_non_send();
-        self.runnable_system_meta.set_is_exclusive();
-    }
-
     pub fn run(&mut self, input: SystemIn<'_, S>, world: &mut World) -> S::Out {
         let world_cell = world.as_unsafe_world_cell();
         self.system
