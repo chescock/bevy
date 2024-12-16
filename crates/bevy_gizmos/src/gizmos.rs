@@ -205,17 +205,6 @@ where
         }
     }
 
-    unsafe fn new_archetype(
-        state: &mut Self::State,
-        archetype: &bevy_ecs::archetype::Archetype,
-        system_meta: &mut SystemMeta,
-    ) {
-        // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
-        unsafe {
-            GizmosState::<Config, Clear>::new_archetype(&mut state.state, archetype, system_meta);
-        };
-    }
-
     fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
         GizmosState::<Config, Clear>::apply(&mut state.state, system_meta, world);
     }
