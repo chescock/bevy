@@ -1,7 +1,6 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use crate::{
-    archetype::ArchetypeComponentId,
     component::{ComponentId, Tick},
     query::{Access, FilteredAccessSet},
     result::Result,
@@ -38,11 +37,6 @@ impl<S: System<In = (), Out = ()>> System for InfallibleSystemWrapper<S> {
     #[inline]
     fn component_access_set(&self) -> &FilteredAccessSet<ComponentId> {
         self.0.component_access_set()
-    }
-
-    #[inline(always)]
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        self.0.archetype_component_access()
     }
 
     #[inline]
@@ -97,8 +91,8 @@ impl<S: System<In = (), Out = ()>> System for InfallibleSystemWrapper<S> {
     }
 
     #[inline]
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        self.0.update_archetype_component_access(world);
+    fn update_archetypes(&mut self, world: UnsafeWorldCell) {
+        self.0.update_archetypes(world);
     }
 
     #[inline]

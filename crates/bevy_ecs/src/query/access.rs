@@ -793,19 +793,6 @@ impl<T: SparseSetIndex> Access<T> {
             self.component_read_and_writes_inverted,
         )
     }
-
-    /// Returns an iterator over the component IDs that this `Access` either
-    /// writes or can't write.
-    ///
-    /// The returned flag specifies whether the list consists of the components
-    /// that the access *can* write (false) or whether the list consists of the
-    /// components that the access *can't* write (true).
-    pub(crate) fn component_writes(&self) -> (impl Iterator<Item = T> + '_, bool) {
-        (
-            self.component_writes.ones().map(T::get_sparse_set_index),
-            self.component_writes_inverted,
-        )
-    }
 }
 
 /// An [`Access`] that has been filtered to include and exclude certain combinations of elements.

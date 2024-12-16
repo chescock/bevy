@@ -304,14 +304,14 @@ unsafe impl<'w, 's, D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static> Re
 {
 }
 
-// SAFETY: Relevant query ComponentId and ArchetypeComponentId access is applied to SystemMeta. If
+// SAFETY: Relevant query ComponentId access is applied to SystemMeta. If
 // this Query conflicts with any prior access, a panic will occur.
 unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Query<'_, '_, D, F> {
     type State = QueryState<D, F>;
     type Item<'w, 's> = Query<'w, 's, D, F>;
 
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        let state = QueryState::new_with_access(world, &mut system_meta.archetype_component_access);
+        let state = QueryState::new(world);
         init_query_param(world, system_meta, &state);
         state
     }
@@ -319,9 +319,9 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Qu
     unsafe fn new_archetype(
         state: &mut Self::State,
         archetype: &Archetype,
-        system_meta: &mut SystemMeta,
+        _system_meta: &mut SystemMeta,
     ) {
-        state.new_archetype(archetype, &mut system_meta.archetype_component_access);
+        state.new_archetype(archetype);
     }
 
     #[inline]
@@ -376,7 +376,7 @@ fn assert_component_access_compatibility(
     panic!("error[B0001]: Query<{}, {}> in system {system_name} accesses component(s) {accesses}in a way that conflicts with a previous system parameter. Consider using `Without<T>` to create disjoint Queries or merging conflicting Queries into a `ParamSet`. See: https://bevyengine.org/learn/errors/b0001", ShortName(query_type), ShortName(filter_type));
 }
 
-// SAFETY: Relevant query ComponentId and ArchetypeComponentId access is applied to SystemMeta. If
+// SAFETY: Relevant query ComponentId access is applied to SystemMeta. If
 // this Query conflicts with any prior access, a panic will occur.
 unsafe impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Single<'a, D, F> {
     type State = QueryState<D, F>;
@@ -440,7 +440,7 @@ unsafe impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam fo
     }
 }
 
-// SAFETY: Relevant query ComponentId and ArchetypeComponentId access is applied to SystemMeta. If
+// SAFETY: Relevant query ComponentId access is applied to SystemMeta. If
 // this Query conflicts with any prior access, a panic will occur.
 unsafe impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam
     for Option<Single<'a, D, F>>
@@ -520,7 +520,7 @@ unsafe impl<'a, D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static> ReadOn
 {
 }
 
-// SAFETY: Relevant query ComponentId and ArchetypeComponentId access is applied to SystemMeta. If
+// SAFETY: Relevant query ComponentId access is applied to SystemMeta. If
 // this Query conflicts with any prior access, a panic will occur.
 unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam
     for Populated<'_, '_, D, F>
@@ -722,7 +722,6 @@ macro_rules! impl_param_set {
                     // Pretend to add each param to the system alone, see if it conflicts
                     let mut $system_meta = system_meta.clone();
                     $system_meta.component_access_set.clear();
-                    $system_meta.archetype_component_access.clear();
                     $param::init_state(world, &mut $system_meta);
                     // The variable is being defined with non_snake_case here
                     let $param = $param::init_state(world, &mut system_meta.clone());
@@ -735,9 +734,6 @@ macro_rules! impl_param_set {
                     system_meta
                         .component_access_set
                         .extend($system_meta.component_access_set);
-                    system_meta
-                        .archetype_component_access
-                        .extend(&$system_meta.archetype_component_access);
                 )*
                 ($($param,)*)
             }
@@ -805,7 +801,7 @@ all_tuples_enumerated!(impl_param_set, 1, 8, P, m, p);
 // SAFETY: Res only reads a single World resource
 unsafe impl<'a, T: Resource> ReadOnlySystemParam for Res<'a, T> {}
 
-// SAFETY: Res ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this Res
+// SAFETY: Res ComponentId access is applied to SystemMeta. If this Res
 // conflicts with any prior access, a panic will occur.
 unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
     type State = ComponentId;
@@ -813,7 +809,6 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
 
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
         let component_id = world.components.register_resource::<T>();
-        let archetype_component_id = world.initialize_resource_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
         assert!(
@@ -825,10 +820,6 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
         system_meta
             .component_access_set
             .add_unfiltered_resource_read(component_id);
-
-        system_meta
-            .archetype_component_access
-            .add_resource_read(archetype_component_id);
 
         component_id
     }
@@ -916,7 +907,7 @@ unsafe impl<'a, T: Resource> SystemParam for Option<Res<'a, T>> {
     }
 }
 
-// SAFETY: Res ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this Res
+// SAFETY: Res ComponentId access is applied to SystemMeta. If this Res
 // conflicts with any prior access, a panic will occur.
 unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
     type State = ComponentId;
@@ -924,7 +915,6 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
 
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
         let component_id = world.components.register_resource::<T>();
-        let archetype_component_id = world.initialize_resource_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
         if combined_access.has_resource_write(component_id) {
@@ -939,10 +929,6 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
         system_meta
             .component_access_set
             .add_unfiltered_resource_write(component_id);
-
-        system_meta
-            .archetype_component_access
-            .add_resource_write(archetype_component_id);
 
         component_id
     }
@@ -1035,16 +1021,6 @@ unsafe impl SystemParam for &'_ World {
     type Item<'w, 's> = &'w World;
 
     fn init_state(_world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        let mut access = Access::default();
-        access.read_all();
-        if !system_meta
-            .archetype_component_access
-            .is_compatible(&access)
-        {
-            panic!("&World conflicts with a previous mutable system parameter. Allowing this would break Rust's mutability rules");
-        }
-        system_meta.archetype_component_access.extend(&access);
-
         let mut filtered_access = FilteredAccess::default();
 
         filtered_access.read_all();
@@ -1085,7 +1061,6 @@ unsafe impl<'w> SystemParam for DeferredWorld<'w> {
             system_meta.name,
         );
         system_meta.component_access_set.write_all();
-        system_meta.archetype_component_access.write_all();
     }
 
     unsafe fn get_param<'world, 'state>(
@@ -1473,7 +1448,7 @@ impl<'a, T> From<NonSendMut<'a, T>> for NonSend<'a, T> {
     }
 }
 
-// SAFETY: NonSendComponentId and ArchetypeComponentId access is applied to SystemMeta. If this
+// SAFETY: NonSendComponentId access is applied to SystemMeta. If this
 // NonSend conflicts with any prior access, a panic will occur.
 unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
     type State = ComponentId;
@@ -1483,7 +1458,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
         system_meta.set_non_send();
 
         let component_id = world.components.register_non_send::<T>();
-        let archetype_component_id = world.initialize_non_send_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
         assert!(
@@ -1495,10 +1469,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
         system_meta
             .component_access_set
             .add_unfiltered_resource_read(component_id);
-
-        system_meta
-            .archetype_component_access
-            .add_resource_read(archetype_component_id);
 
         component_id
     }
@@ -1581,7 +1551,7 @@ unsafe impl<T: 'static> SystemParam for Option<NonSend<'_, T>> {
     }
 }
 
-// SAFETY: NonSendMut ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this
+// SAFETY: NonSendMut ComponentId access is applied to SystemMeta. If this
 // NonSendMut conflicts with any prior access, a panic will occur.
 unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
     type State = ComponentId;
@@ -1591,7 +1561,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
         system_meta.set_non_send();
 
         let component_id = world.components.register_non_send::<T>();
-        let archetype_component_id = world.initialize_non_send_internal(component_id).id();
 
         let combined_access = system_meta.component_access_set.combined_access();
         if combined_access.has_component_write(component_id) {
@@ -1606,10 +1575,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
         system_meta
             .component_access_set
             .add_unfiltered_resource_write(component_id);
-
-        system_meta
-            .archetype_component_access
-            .add_resource_write(archetype_component_id);
 
         component_id
     }

@@ -163,7 +163,7 @@ pub unsafe trait SystemParamBuilder<P: SystemParam>: Sized {
 ///     .build_state(&mut world)
 ///     .build_system(my_system);
 /// ```
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct ParamBuilder;
 
 // SAFETY: Calls `SystemParam::init_state`
@@ -241,7 +241,7 @@ unsafe impl<'w, 's, D: QueryData + 'static, F: QueryFilter + 'static>
 ///     .build_state(&mut world)
 ///     .build_system(|query: Query<()>| {
 ///         for _ in &query {
-///             // This only includes entities with a `Player` component.
+///             // This only includes entities with an `Player` component.
 ///         }
 ///     });
 ///
@@ -258,7 +258,6 @@ unsafe impl<'w, 's, D: QueryData + 'static, F: QueryFilter + 'static>
 ///     .build_state(&mut world)
 ///     .build_system(|query: Vec<Query<()>>| {});
 /// ```
-#[derive(Clone)]
 pub struct QueryParamBuilder<T>(T);
 
 impl<T> QueryParamBuilder<T> {
@@ -301,28 +300,14 @@ unsafe impl<
 
 macro_rules! impl_system_param_builder_tuple {
     ($(#[$meta:meta])* $(($param: ident, $builder: ident)),*) => {
-        #[expect(
-            clippy::allow_attributes,
-            reason = "This is in a macro; as such, the below lints may not always apply."
-        )]
-        #[allow(
-            unused_variables,
-            reason = "Zero-length tuples won't use any of the parameters."
-        )]
-        #[allow(
-            non_snake_case,
-            reason = "The variable names are provided by the macro caller, not by us."
-        )]
         $(#[$meta])*
         // SAFETY: implementors of each `SystemParamBuilder` in the tuple have validated their impls
         unsafe impl<$($param: SystemParam,)* $($builder: SystemParamBuilder<$param>,)*> SystemParamBuilder<($($param,)*)> for ($($builder,)*) {
-            fn build(self, world: &mut World, meta: &mut SystemMeta) -> <($($param,)*) as SystemParam>::State {
+            fn build(self, _world: &mut World, _meta: &mut SystemMeta) -> <($($param,)*) as SystemParam>::State {
+                #[allow(non_snake_case)]
                 let ($($builder,)*) = self;
-                #[allow(
-                    clippy::unused_unit,
-                    reason = "Zero-length tuples won't generate any calls to the system parameter builders."
-                )]
-                ($($builder.build(world, meta),)*)
+                #[allow(clippy::unused_unit)]
+                ($($builder.build(_world, _meta),)*)
             }
         }
     };
@@ -417,26 +402,14 @@ unsafe impl<P: SystemParam, B: SystemParamBuilder<P>> SystemParamBuilder<Vec<P>>
 ///     set.for_each(|mut query| for mut health in query.iter_mut() {});
 /// }
 /// ```
-#[derive(Debug, Default, Clone)]
 pub struct ParamSetBuilder<T>(pub T);
 
 macro_rules! impl_param_set_builder_tuple {
     ($(($param: ident, $builder: ident, $meta: ident)),*) => {
-        #[expect(
-            clippy::allow_attributes,
-            reason = "This is in a macro; as such, the below lints may not always apply."
-        )]
-        #[allow(
-            unused_variables,
-            reason = "Zero-length tuples won't use any of the parameters."
-        )]
-        #[allow(
-            non_snake_case,
-            reason = "The variable names are provided by the macro caller, not by us."
-        )]
         // SAFETY: implementors of each `SystemParamBuilder` in the tuple have validated their impls
         unsafe impl<'w, 's, $($param: SystemParam,)* $($builder: SystemParamBuilder<$param>,)*> SystemParamBuilder<ParamSet<'w, 's, ($($param,)*)>> for ParamSetBuilder<($($builder,)*)> {
-            fn build(self, world: &mut World, system_meta: &mut SystemMeta) -> <($($param,)*) as SystemParam>::State {
+            #[allow(non_snake_case)]
+            fn build(self, _world: &mut World, _system_meta: &mut SystemMeta) -> <($($param,)*) as SystemParam>::State {
                 let ParamSetBuilder(($($builder,)*)) = self;
                 // Note that this is slightly different from `init_state`, which calls `init_state` on each param twice.
                 // One call populates an empty `SystemMeta` with the new access, while the other runs against a cloned `SystemMeta` to check for conflicts.
@@ -444,20 +417,17 @@ macro_rules! impl_param_set_builder_tuple {
                 // That means that any `filtered_accesses` in the `component_access_set` will get copied to every `$meta`
                 // and will appear multiple times in the final `SystemMeta`.
                 $(
-                    let mut $meta = system_meta.clone();
-                    let $param = $builder.build(world, &mut $meta);
+                    let mut $meta = _system_meta.clone();
+                    let $param = $builder.build(_world, &mut $meta);
                 )*
                 // Make the ParamSet non-send if any of its parameters are non-send.
                 if false $(|| !$meta.is_send())* {
-                    system_meta.set_non_send();
+                    _system_meta.set_non_send();
                 }
                 $(
-                    system_meta
+                    _system_meta
                         .component_access_set
                         .extend($meta.component_access_set);
-                    system_meta
-                        .archetype_component_access
-                        .extend(&$meta.archetype_component_access);
                 )*
                 #[allow(
                     clippy::unused_unit,
@@ -471,7 +441,7 @@ macro_rules! impl_param_set_builder_tuple {
 
 all_tuples!(impl_param_set_builder_tuple, 1, 8, P, B, meta);
 
-// SAFETY: Relevant parameter ComponentId and ArchetypeComponentId access is applied to SystemMeta. If any ParamState conflicts
+// SAFETY: Relevant parameter ComponentId access is applied to SystemMeta. If any ParamState conflicts
 // with any prior access, a panic will occur.
 unsafe impl<'w, 's, P: SystemParam, B: SystemParamBuilder<P>>
     SystemParamBuilder<ParamSet<'w, 's, Vec<P>>> for ParamSetBuilder<Vec<B>>
@@ -495,9 +465,6 @@ unsafe impl<'w, 's, P: SystemParam, B: SystemParamBuilder<P>>
             system_meta
                 .component_access_set
                 .extend(meta.component_access_set);
-            system_meta
-                .archetype_component_access
-                .extend(&meta.archetype_component_access);
         }
         states
     }
@@ -590,7 +557,7 @@ impl<'a> FilteredResourcesParamBuilder<Box<dyn FnOnce(&mut FilteredResourcesBuil
     }
 }
 
-// SAFETY: Resource ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this FilteredResources
+// SAFETY: Resource ComponentId access is applied to SystemMeta. If this FilteredResources
 // conflicts with any prior access, a panic will occur.
 unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesBuilder)>
     SystemParamBuilder<FilteredResources<'w, 's>> for FilteredResourcesParamBuilder<T>
@@ -615,15 +582,10 @@ unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesBuilder)>
         if access.has_read_all_resources() {
             meta.component_access_set
                 .add_unfiltered_read_all_resources();
-            meta.archetype_component_access.read_all_resources();
         } else {
             for component_id in access.resource_reads_and_writes() {
                 meta.component_access_set
                     .add_unfiltered_resource_read(component_id);
-
-                let archetype_component_id = world.initialize_resource_internal(component_id).id();
-                meta.archetype_component_access
-                    .add_resource_read(archetype_component_id);
             }
         }
 
@@ -654,7 +616,7 @@ impl<'a> FilteredResourcesMutParamBuilder<Box<dyn FnOnce(&mut FilteredResourcesM
     }
 }
 
-// SAFETY: Resource ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this FilteredResources
+// SAFETY: Resource ComponentId access is applied to SystemMeta. If this FilteredResources
 // conflicts with any prior access, a panic will occur.
 unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesMutBuilder)>
     SystemParamBuilder<FilteredResourcesMut<'w, 's>> for FilteredResourcesMutParamBuilder<T>
@@ -679,30 +641,20 @@ unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesMutBuilder)>
         if access.has_read_all_resources() {
             meta.component_access_set
                 .add_unfiltered_read_all_resources();
-            meta.archetype_component_access.read_all_resources();
         } else {
             for component_id in access.resource_reads() {
                 meta.component_access_set
                     .add_unfiltered_resource_read(component_id);
-
-                let archetype_component_id = world.initialize_resource_internal(component_id).id();
-                meta.archetype_component_access
-                    .add_resource_read(archetype_component_id);
             }
         }
 
         if access.has_write_all_resources() {
             meta.component_access_set
                 .add_unfiltered_write_all_resources();
-            meta.archetype_component_access.write_all_resources();
         } else {
             for component_id in access.resource_writes() {
                 meta.component_access_set
                     .add_unfiltered_resource_write(component_id);
-
-                let archetype_component_id = world.initialize_resource_internal(component_id).id();
-                meta.archetype_component_access
-                    .add_resource_write(archetype_component_id);
             }
         }
 

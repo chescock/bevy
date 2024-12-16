@@ -123,9 +123,9 @@ impl SystemExecutor for SingleThreadedExecutor {
                 } else {
                     // Use run_unsafe to avoid immediately applying deferred buffers
                     let world = world.as_unsafe_world_cell();
-                    system.update_archetype_component_access(world);
+                    system.update_archetypes(world);
                     // SAFETY: We have exclusive, single-threaded access to the world and
-                    // update_archetype_component_access is being called immediately before this.
+                    // update_archetypes is being called immediately before this.
                     unsafe {
                         // TODO: implement an error-handling API instead of panicking.
                         if let Err(err) = __rust_begin_short_backtrace::run_unsafe(system, world) {

@@ -1,5 +1,4 @@
 use crate::{
-    archetype::ArchetypeComponentId,
     component::{ComponentId, Tick},
     query::{Access, FilteredAccessSet},
     schedule::{InternedSystemSet, SystemSet},
@@ -90,11 +89,6 @@ where
     }
 
     #[inline]
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.system_meta.archetype_component_access
-    }
-
-    #[inline]
     fn is_send(&self) -> bool {
         // exclusive systems should have access to non-send resources
         // the executor runs exclusive systems on the main thread, so this
@@ -166,7 +160,7 @@ where
         self.param_state = Some(F::Param::init(world, &mut self.system_meta));
     }
 
-    fn update_archetype_component_access(&mut self, _world: UnsafeWorldCell) {}
+    fn update_archetypes(&mut self, _world: UnsafeWorldCell) {}
 
     #[inline]
     fn check_change_tick(&mut self, change_tick: Tick) {

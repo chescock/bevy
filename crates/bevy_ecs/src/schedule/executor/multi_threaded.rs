@@ -468,7 +468,7 @@ impl ExecutorState {
                 self.ready_systems.remove(system_index);
 
                 // SAFETY: `can_run` returned true, which means that:
-                // - It must have called `update_archetype_component_access` for each run condition.
+                // - It must have called `update_archetypes` for each run condition.
                 // - There can be no systems running whose accesses would conflict with any conditions.
                 if unsafe {
                     !self.should_run(
@@ -499,7 +499,7 @@ impl ExecutorState {
 
                 // SAFETY:
                 // - Caller ensured no other reference to this system exists.
-                // - `can_run` has been called, which calls `update_archetype_component_access` with this system.
+                // - `can_run` has been called, which calls `update_archetypes` with this system.
                 // - `can_run` returned true, so no systems with conflicting world access are running.
                 unsafe {
                     self.spawn_system_task(context, system_index);
@@ -532,7 +532,7 @@ impl ExecutorState {
             .difference(&self.evaluated_sets)
         {
             for condition in &mut conditions.set_conditions[set_idx] {
-                condition.update_archetype_component_access(world);
+                condition.update_archetypes(world);
             }
             if !self.set_condition_conflicting_systems[set_idx].is_disjoint(&self.running_systems) {
                 return false;
@@ -540,7 +540,7 @@ impl ExecutorState {
         }
 
         for condition in &mut conditions.system_conditions[system_index] {
-            condition.update_archetype_component_access(world);
+            condition.update_archetypes(world);
         }
         if !system_meta
             .condition_conflicting_systems
@@ -550,7 +550,7 @@ impl ExecutorState {
         }
 
         if !self.skipped_systems.contains(system_index) {
-            system.update_archetype_component_access(world);
+            system.update_archetypes(world);
             if !system_meta
                 .conflicting_systems
                 .is_disjoint(&self.running_systems)
@@ -566,7 +566,7 @@ impl ExecutorState {
     /// * `world` must have permission to read any world data required by
     ///   the system's conditions: this includes conditions for the system
     ///   itself, and conditions for any of the system's sets.
-    /// * `update_archetype_component` must have been called with `world`
+    /// * `update_archetypes` must have been called with `world`
     ///   for the system as well as system and system set's run conditions.
     unsafe fn should_run(
         &mut self,
@@ -586,7 +586,7 @@ impl ExecutorState {
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the conditions.
-            // - `update_archetype_component_access` has been called for each run condition.
+            // - `update_archetypes` has been called for each run condition.
             let set_conditions_met = unsafe {
                 evaluate_and_fold_conditions(&mut conditions.set_conditions[set_idx], world)
             };
@@ -604,7 +604,7 @@ impl ExecutorState {
         // SAFETY:
         // - The caller ensures that `world` has permission to read any data
         //   required by the conditions.
-        // - `update_archetype_component_access` has been called for each run condition.
+        // - `update_archetypes` has been called for each run condition.
         let system_conditions_met = unsafe {
             evaluate_and_fold_conditions(&mut conditions.system_conditions[system_index], world)
         };
@@ -619,7 +619,7 @@ impl ExecutorState {
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the system.
-            // - `update_archetype_component_access` has been called for system.
+            // - `update_archetypes` has been called for system.
             let valid_params = unsafe { system.validate_param_unsafe(world) };
             if !valid_params {
                 self.skipped_systems.insert(system_index);
@@ -634,7 +634,7 @@ impl ExecutorState {
     /// - Caller must not alias systems that are running.
     /// - `world` must have permission to access the world data
     ///   used by the specified system.
-    /// - `update_archetype_component_access` must have been called with `world`
+    /// - `update_archetypes` must have been called with `world`
     ///   on the system associated with `system_index`.
     unsafe fn spawn_system_task(&mut self, context: &Context, system_index: usize) {
         // SAFETY: this system is not running, no other reference exists
@@ -649,7 +649,7 @@ impl ExecutorState {
                 // SAFETY:
                 // - The caller ensures that we have permission to
                 // access the world data used by the system.
-                // - `update_archetype_component_access` has been called.
+                // - `update_archetypes` has been called.
                 unsafe {
                     // TODO: implement an error-handling API instead of panicking.
                     if let Err(err) = __rust_begin_short_backtrace::run_unsafe(
@@ -783,7 +783,7 @@ fn apply_deferred(
 /// # Safety
 /// - `world` must have permission to read any world data
 ///   required by `conditions`.
-/// - `update_archetype_component_access` must have been called
+/// - `update_archetypes` must have been called
 ///   with `world` for each condition in `conditions`.
 unsafe fn evaluate_and_fold_conditions(
     conditions: &mut [BoxedCondition],
@@ -799,14 +799,14 @@ unsafe fn evaluate_and_fold_conditions(
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the condition.
-            // - `update_archetype_component_access` has been called for condition.
+            // - `update_archetypes` has been called for condition.
             if !unsafe { condition.validate_param_unsafe(world) } {
                 return false;
             }
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the condition.
-            // - `update_archetype_component_access` has been called for condition.
+            // - `update_archetypes` has been called for condition.
             unsafe { __rust_begin_short_backtrace::readonly_run_unsafe(&mut **condition, world) }
         })
         .fold(true, |acc, res| acc && res)

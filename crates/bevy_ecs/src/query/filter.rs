@@ -672,7 +672,7 @@ unsafe impl<T: Component> WorldQuery for Added<T> {
                 || None,
                 || {
                     // SAFETY: The underlying type associated with `component_id` is `T`,
-                    // which we are allowed to access since we registered it in `update_archetype_component_access`.
+                    // which we are allowed to access since we registered it in `update_archetypes`.
                     // Note that we do not actually access any components' ticks in this function, we just get a shared
                     // reference to the sparse set, which is used to access the components' ticks in `Self::fetch`.
                     unsafe { world.storages().sparse_sets.get(id) }
@@ -899,7 +899,7 @@ unsafe impl<T: Component> WorldQuery for Changed<T> {
                 || None,
                 || {
                     // SAFETY: The underlying type associated with `component_id` is `T`,
-                    // which we are allowed to access since we registered it in `update_archetype_component_access`.
+                    // which we are allowed to access since we registered it in `update_archetypes`.
                     // Note that we do not actually access any components' ticks in this function, we just get a shared
                     // reference to the sparse set, which is used to access the components' ticks in `Self::fetch`.
                     unsafe { world.storages().sparse_sets.get(id) }

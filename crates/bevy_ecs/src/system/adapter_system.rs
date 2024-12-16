@@ -137,13 +137,6 @@ where
         self.system.component_access_set()
     }
 
-    #[inline]
-    fn archetype_component_access(
-        &self,
-    ) -> &crate::query::Access<crate::archetype::ArchetypeComponentId> {
-        self.system.archetype_component_access()
-    }
-
     fn is_send(&self) -> bool {
         self.system.is_send()
     }
@@ -195,8 +188,8 @@ where
     }
 
     #[inline]
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        self.system.update_archetype_component_access(world);
+    fn update_archetypes(&mut self, world: UnsafeWorldCell) {
+        self.system.update_archetypes(world);
     }
 
     fn check_change_tick(&mut self, change_tick: crate::component::Tick) {

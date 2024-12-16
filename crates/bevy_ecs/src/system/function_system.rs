@@ -1,5 +1,5 @@
 use crate::{
-    archetype::{ArchetypeComponentId, ArchetypeGeneration},
+    archetype::ArchetypeGeneration,
     component::{ComponentId, Tick},
     prelude::FromWorld,
     query::{Access, FilteredAccessSet},
@@ -28,16 +28,6 @@ pub struct SystemMeta {
     /// - soundness issues (e.g. multiple [`SystemParam`]s mutably accessing the same component)
     /// - ambiguities in the schedule (e.g. two systems that have some sort of conflicting access)
     pub(crate) component_access_set: FilteredAccessSet<ComponentId>,
-    /// This [`Access`] is used to determine which systems can run in parallel with each other
-    /// in the multithreaded executor.
-    ///
-    /// We use a [`ArchetypeComponentId`] as it is more precise than just checking [`ComponentId`]:
-    /// for example if you have one system with `Query<&mut T, With<A>>` and one system with `Query<&mut T, With<B>>`
-    /// they conflict if you just look at the [`ComponentId`] of `T`; but if there are no archetypes with
-    /// both `A`, `B` and `T` then in practice there's no risk of conflict. By using [`ArchetypeComponentId`]
-    /// we can be more precise because we can check if the existing archetypes of the [`World`]
-    /// cause a conflict
-    pub(crate) archetype_component_access: Access<ArchetypeComponentId>,
     // NOTE: this must be kept private. making a SystemMeta non-send is irreversible to prevent
     // SystemParams from overriding each other
     is_send: bool,
@@ -55,7 +45,6 @@ impl SystemMeta {
         let name = core::any::type_name::<T>();
         Self {
             name: name.into(),
-            archetype_component_access: Access::default(),
             component_access_set: FilteredAccessSet::default(),
             is_send: true,
             has_deferred: false,
@@ -135,37 +124,6 @@ impl SystemMeta {
         P: SystemParam,
     {
         self.param_warn_policy.try_warn::<P>(&self.name);
-    }
-
-    /// Archetype component access that is used to determine which systems can run in parallel with each other
-    /// in the multithreaded executor.
-    ///
-    /// We use an [`ArchetypeComponentId`] as it is more precise than just checking [`ComponentId`]:
-    /// for example if you have one system with `Query<&mut A, With<B>`, and one system with `Query<&mut A, Without<B>`,
-    /// they conflict if you just look at the [`ComponentId`];
-    /// but no archetype that matches the first query will match the second and vice versa,
-    /// which means there's no risk of conflict.
-    #[inline]
-    pub fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.archetype_component_access
-    }
-
-    /// Returns a mutable reference to the [`Access`] for [`ArchetypeComponentId`].
-    /// This is used to determine which systems can run in parallel with each other
-    /// in the multithreaded executor.
-    ///
-    /// We use an [`ArchetypeComponentId`] as it is more precise than just checking [`ComponentId`]:
-    /// for example if you have one system with `Query<&mut A, With<B>`, and one system with `Query<&mut A, Without<B>`,
-    /// they conflict if you just look at the [`ComponentId`];
-    /// but no archetype that matches the first query will match the second and vice versa,
-    /// which means there's no risk of conflict.
-    ///
-    /// # Safety
-    ///
-    /// No access can be removed from the returned [`Access`].
-    #[inline]
-    pub unsafe fn archetype_component_access_mut(&mut self) -> &mut Access<ArchetypeComponentId> {
-        &mut self.archetype_component_access
     }
 
     /// Returns a reference to the [`FilteredAccessSet`] for [`ComponentId`].
@@ -515,7 +473,7 @@ impl<Param: SystemParam> SystemState<Param> {
     /// # Safety
     ///
     /// - The passed [`UnsafeWorldCell`] must have read-only access to
-    ///   world data in `archetype_component_access`.
+    ///   world data in `component_access_set`.
     /// - `world` must be the same [`World`] that was used to initialize [`state`](SystemParam::init_state).
     pub unsafe fn validate_param(state: &Self, world: UnsafeWorldCell) -> bool {
         // SAFETY: Delegated to existing `SystemParam` implementations.
@@ -706,7 +664,7 @@ struct FunctionSystemState<P: SystemParam> {
     /// The cached state of the system's [`SystemParam`]s.
     param: P::State,
     /// The id of the [`World`] this system was initialized with. If the world
-    /// passed to [`System::update_archetype_component_access`] does not match
+    /// passed to [`System::update_archetypes`] does not match
     /// this id, a panic will occur.
     world_id: WorldId,
 }
@@ -796,11 +754,6 @@ where
     }
 
     #[inline]
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        &self.system_meta.archetype_component_access
-    }
-
-    #[inline]
     fn is_send(&self) -> bool {
         self.system_meta.is_send
     }
@@ -828,7 +781,7 @@ where
 
         let param_state = &mut self.state.as_mut().expect(Self::ERROR_UNINITIALIZED).param;
         // SAFETY:
-        // - The caller has invoked `update_archetype_component_access`, which will panic
+        // - The caller has invoked `update_archetypes`, which will panic
         //   if the world does not match.
         // - All world accesses used by `F::Param` have been registered, so the caller
         //   will ensure that there are no data access conflicts.
@@ -855,7 +808,7 @@ where
     unsafe fn validate_param_unsafe(&mut self, world: UnsafeWorldCell) -> bool {
         let param_state = &self.state.as_ref().expect(Self::ERROR_UNINITIALIZED).param;
         // SAFETY:
-        // - The caller has invoked `update_archetype_component_access`, which will panic
+        // - The caller has invoked `update_archetypes`, which will panic
         //   if the world does not match.
         // - All world accesses used by `F::Param` have been registered, so the caller
         //   will ensure that there are no data access conflicts.
@@ -883,7 +836,7 @@ where
         self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
     }
 
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
+    fn update_archetypes(&mut self, world: UnsafeWorldCell) {
         let state = self.state.as_mut().expect(Self::ERROR_UNINITIALIZED);
         assert_eq!(state.world_id, world.id(), "Encountered a mismatched World. A System cannot be used with Worlds other than the one it was initialized with.");
 
