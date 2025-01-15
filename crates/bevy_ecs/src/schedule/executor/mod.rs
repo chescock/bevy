@@ -2,6 +2,7 @@
 mod multi_threaded;
 mod simple;
 mod single_threaded;
+mod notify_mutex;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use core::any::TypeId;

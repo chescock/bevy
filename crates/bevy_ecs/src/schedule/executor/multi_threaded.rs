@@ -4,10 +4,7 @@ use bevy_utils::{default, syncunsafecell::SyncUnsafeCell};
 use concurrent_queue::ConcurrentQueue;
 use core::{any::Any, panic::AssertUnwindSafe};
 use fixedbitset::FixedBitSet;
-use std::{
-    eprintln,
-    sync::{Mutex, MutexGuard},
-};
+use std::{eprintln, sync::Mutex};
 
 #[cfg(feature = "trace")]
 use tracing::{info_span, Span};
@@ -29,7 +26,7 @@ use crate::{
 
 use crate as bevy_ecs;
 
-use super::__rust_begin_short_backtrace;
+use super::{__rust_begin_short_backtrace, notify_mutex::NotifyMutex};
 
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
@@ -87,7 +84,7 @@ struct SystemResult {
 /// Runs the schedule using a thread pool. Non-conflicting systems can run in parallel.
 pub struct MultiThreadedExecutor {
     /// The running state, protected by a mutex so that a reference to the executor can be shared across tasks.
-    state: Mutex<ExecutorState>,
+    state: NotifyMutex<ExecutorState>,
     /// Queue of system completion events.
     system_completion: ConcurrentQueue<SystemResult>,
     /// Setting when true applies deferred system buffers after all systems have run
@@ -152,7 +149,7 @@ impl SystemExecutor for MultiThreadedExecutor {
     }
 
     fn init(&mut self, schedule: &SystemSchedule) {
-        let state = self.state.get_mut().unwrap();
+        let state = self.state.get_mut();
         // pre-allocate space
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();
@@ -189,7 +186,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
     ) {
-        let state = self.state.get_mut().unwrap();
+        let state = self.state.get_mut();
         // reset counts
         if schedule.systems.is_empty() {
             return;
@@ -238,7 +235,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         // End the borrows of self and world in environment by copying out the reference to systems.
         let systems = environment.systems;
 
-        let state = self.state.get_mut().unwrap();
+        let state = self.state.get_mut();
         if self.apply_final_deferred {
             // Do one final apply buffers after all systems have completed
             // Commands should be applied while on the scope's thread, not the executor's thread
@@ -293,30 +290,22 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         self.tick_executor();
     }
 
-    fn try_lock<'a>(&'a self) -> Option<(&'a mut Conditions<'sys>, MutexGuard<'a, ExecutorState>)> {
-        let guard = self.environment.executor.state.try_lock().ok()?;
-        // SAFETY: This is an exclusive access as no other location fetches conditions mutably, and
-        // is synchronized by the lock on the executor state.
-        let conditions = unsafe { &mut *self.environment.conditions.get() };
-        Some((conditions, guard))
-    }
-
     fn tick_executor(&self) {
         // Ensure that the executor handles any events pushed to the system_completion queue by this thread.
         // If this thread acquires the lock, the executor runs after the push() and they are processed.
-        // If this thread does not acquire the lock, then the is_empty() check on the other thread runs
-        // after the lock is released, which is after try_lock() failed, which is after the push()
-        // on this thread, so the is_empty() check will see the new events and loop.
-        loop {
-            let Some((conditions, mut guard)) = self.try_lock() else {
-                return;
-            };
+        // If this thread does not acquire the lock, then the `lock_or_notify` call ensures that `try_unlock` will fail
+        // and the executor will run again on the other thread.
+        let executor = self.environment.executor;
+        let mut maybe_guard = executor.state.try_lock().or_else(|| {
+            // SAFETY: We only call this once per system, and there are fewer than usize::MAX systems
+            unsafe { executor.state.lock_or_notify() }
+        });
+        while let Some(mut guard) = maybe_guard {
+            // SAFETY: This is an exclusive access as no other location fetches conditions mutably, and
+            // is synchronized by the lock on the executor state.
+            let conditions = unsafe { &mut *self.environment.conditions.get() };
             guard.tick(self, conditions);
-            // Make sure we drop the guard before checking system_completion.is_empty(), or we could lose events.
-            drop(guard);
-            if self.environment.executor.system_completion.is_empty() {
-                return;
-            }
+            maybe_guard = guard.try_unlock().err();
         }
     }
 }
@@ -327,7 +316,7 @@ impl MultiThreadedExecutor {
     /// [`Schedule`]: crate::schedule::Schedule
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(ExecutorState::new()),
+            state: NotifyMutex::new(ExecutorState::new()),
             system_completion: ConcurrentQueue::unbounded(),
             starting_systems: FixedBitSet::new(),
             apply_final_deferred: true,
