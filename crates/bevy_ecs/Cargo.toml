@@ -64,6 +64,7 @@ edge_executor = ["dep:bevy_tasks", "bevy_tasks/edge_executor"]
 ## on `no_std` targets, but provides access to certain additional features on
 ## supported platforms.
 std = [
+  "dep:thread_local",
   "bevy_reflect?/std",
   "bevy_tasks/std",
   "bevy_utils/std",
@@ -138,6 +139,7 @@ spin = { version = "0.9.8", default-features = false, features = [
 tracing = { version = "0.1", default-features = false, optional = true }
 log = { version = "0.4", default-features = false }
 bumpalo = "3"
+thread_local = { version = "1", optional = true }
 
 [dev-dependencies]
 rand = "0.8"

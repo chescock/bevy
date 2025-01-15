@@ -3,6 +3,7 @@ mod multi_threaded;
 mod simple;
 mod single_threaded;
 mod notify_mutex;
+mod gather_queue;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use core::any::TypeId;

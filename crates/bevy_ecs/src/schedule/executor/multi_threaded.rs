@@ -1,7 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool, ThreadExecutor};
 use bevy_utils::{default, syncunsafecell::SyncUnsafeCell};
-use concurrent_queue::ConcurrentQueue;
 use core::{any::Any, panic::AssertUnwindSafe};
 use fixedbitset::FixedBitSet;
 use std::{eprintln, sync::Mutex};
@@ -26,7 +25,7 @@ use crate::{
 
 use crate as bevy_ecs;
 
-use super::{__rust_begin_short_backtrace, notify_mutex::NotifyMutex};
+use super::{__rust_begin_short_backtrace, gather_queue::GatherQueue, notify_mutex::NotifyMutex};
 
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
@@ -86,7 +85,7 @@ pub struct MultiThreadedExecutor {
     /// The running state, protected by a mutex so that a reference to the executor can be shared across tasks.
     state: NotifyMutex<ExecutorState>,
     /// Queue of system completion events.
-    system_completion: ConcurrentQueue<SystemResult>,
+    system_completion: GatherQueue<SystemResult>,
     /// Setting when true applies deferred system buffers after all systems have run
     apply_final_deferred: bool,
     /// When set, tells the executor that a thread has panicked.
@@ -154,7 +153,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();
 
-        self.system_completion = ConcurrentQueue::bounded(sys_count.max(1));
+        self.system_completion = GatherQueue::new(sys_count.max(1));
         self.starting_systems = FixedBitSet::with_capacity(sys_count);
         state.evaluated_sets = FixedBitSet::with_capacity(set_count);
         state.ready_systems = FixedBitSet::with_capacity(sys_count);
@@ -278,7 +277,7 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
             .executor
             .system_completion
             .push(SystemResult { system_index })
-            .unwrap_or_else(|error| unreachable!("{}", error));
+            .unwrap_or_else(|_| unreachable!("Queue was full"));
         if let Err(payload) = res {
             eprintln!("Encountered a panic in system `{}`!", &*system.name());
             // set the payload to propagate the error
@@ -296,10 +295,8 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         // If this thread does not acquire the lock, then the `lock_or_notify` call ensures that `try_unlock` will fail
         // and the executor will run again on the other thread.
         let executor = self.environment.executor;
-        let mut maybe_guard = executor.state.try_lock().or_else(|| {
-            // SAFETY: We only call this once per system, and there are fewer than usize::MAX systems
-            unsafe { executor.state.lock_or_notify() }
-        });
+        // SAFETY: We only call this once per system, and there are fewer than usize::MAX systems
+        let mut maybe_guard = unsafe { executor.state.lock_or_notify() };
         while let Some(mut guard) = maybe_guard {
             // SAFETY: This is an exclusive access as no other location fetches conditions mutably, and
             // is synchronized by the lock on the executor state.
@@ -317,7 +314,7 @@ impl MultiThreadedExecutor {
     pub fn new() -> Self {
         Self {
             state: NotifyMutex::new(ExecutorState::new()),
-            system_completion: ConcurrentQueue::unbounded(),
+            system_completion: GatherQueue::new(0),
             starting_systems: FixedBitSet::new(),
             apply_final_deferred: true,
             panic_payload: Mutex::new(None),
@@ -350,7 +347,8 @@ impl ExecutorState {
         #[cfg(feature = "trace")]
         let _span = context.environment.executor.executor_span.enter();
 
-        for result in context.environment.executor.system_completion.try_iter() {
+        // SAFETY: We only call drain while holding the lock on the executor state
+        for result in unsafe { context.environment.executor.system_completion.drain() } {
             self.finish_system_and_handle_dependents(result);
         }
 
