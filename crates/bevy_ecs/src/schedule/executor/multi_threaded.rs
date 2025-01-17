@@ -228,7 +228,7 @@ impl SystemExecutor for MultiThreadedExecutor {
 
                 // The first tick won't need to process finished systems, but we still need to run the loop in
                 // tick_executor() in case a system completes while the first tick still holds the mutex.
-                context.tick_executor(None);
+                context.tick_executor();
             },
         );
 
@@ -273,6 +273,12 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         res: Result<(), Box<dyn Any + Send>>,
         system: &ScheduleSystem,
     ) {
+        // tell the executor that the system finished
+        self.environment
+            .executor
+            .system_completion
+            .push(SystemResult { system_index })
+            .unwrap_or_else(|error| unreachable!("{}", error));
         if let Err(payload) = res {
             eprintln!("Encountered a panic in system `{}`!", &*system.name());
             // set the payload to propagate the error
@@ -281,26 +287,16 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
                 *panic_payload = Some(payload);
             }
         }
-        self.tick_executor(Some(SystemResult { system_index }));
+        self.tick_executor();
     }
 
-    fn tick_executor(&self, mut result: Option<SystemResult>) {
-        // Ensure that the executor handles all system completion events.
-        // If this thread acquires the lock, the event handled by this thread without going the the queue.
-        // If this thread does not acquire the lock, we push the event to the queue.
-        // The `lock_or_notify` call ensures that `try_unlock` will fail
+    fn tick_executor(&self) {
+        // Ensure that the executor handles any events pushed to the system_completion queue by this thread.
+        // If this thread acquires the lock, the executor runs after the push() and they are processed.
+        // If this thread does not acquire the lock, then the `lock_or_notify` call ensures that `try_unlock` will fail
         // and the executor will run again on the other thread.
         let executor = self.environment.executor;
         let mut maybe_guard = executor.state.try_lock().or_else(|| {
-            // If we didn't acquire the lock, push the system result to the queue
-            // and notify the thread holding the lock to run again.
-            if let Some(system_result) = result.take() {
-                executor
-                    .system_completion
-                    .push(system_result)
-                    .unwrap_or_else(|error| unreachable!("{}", error));
-            }
-
             // SAFETY: We only call this once per system, and there are fewer than usize::MAX systems
             unsafe { executor.state.lock_or_notify() }
         });
@@ -308,7 +304,7 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
             // SAFETY: This is an exclusive access as no other location fetches conditions mutably, and
             // is synchronized by the lock on the executor state.
             let conditions = unsafe { &mut *self.environment.conditions.get() };
-            guard.tick(self, conditions, result.take());
+            guard.tick(self, conditions);
             maybe_guard = guard.try_unlock().err();
         }
     }
@@ -350,18 +346,9 @@ impl ExecutorState {
         }
     }
 
-    fn tick(
-        &mut self,
-        context: &Context,
-        conditions: &mut Conditions,
-        result: Option<SystemResult>,
-    ) {
+    fn tick(&mut self, context: &Context, conditions: &mut Conditions) {
         #[cfg(feature = "trace")]
         let _span = context.environment.executor.executor_span.enter();
-
-        if let Some(result) = result {
-            self.finish_system_and_handle_dependents(result);
-        }
 
         for result in context.environment.executor.system_completion.try_iter() {
             self.finish_system_and_handle_dependents(result);
