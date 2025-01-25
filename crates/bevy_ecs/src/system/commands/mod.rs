@@ -38,6 +38,8 @@ use crate::{
     },
 };
 
+use super::SystemParamFunction;
+
 /// A [`Command`] queue to perform structural changes to the [`World`].
 ///
 /// Since each command requires exclusive access to the `World`,
@@ -1032,6 +1034,17 @@ impl<'w, 's> Commands<'w, 's> {
         self.queue(
             command::run_system_cached_with(system, input).handle_error_with(error_handler::warn()),
         );
+    }
+
+    ///
+    pub fn run_system_cached_with_state<M, F>(&mut self, f: F)
+    where
+        F: SystemParamFunction<M, In = (), Out = (), Param: 'static>,
+    {
+        self.queue(
+            (|world: &mut World| world.run_system_cached_with_state(f))
+                .handle_error_with(error_handler::warn()),
+        )
     }
 
     /// Sends a "global" [`Trigger`] without any targets. This will run any [`Observer`] of the `event` that
@@ -2153,7 +2166,7 @@ mod tests {
     use crate::{
         self as bevy_ecs,
         component::{require, Component},
-        system::{Commands, Resource},
+        system::{Commands, ResMut, Resource},
         world::{CommandQueue, FromWorld, World},
     };
     use alloc::{string::String, sync::Arc, vec, vec::Vec};
@@ -2530,5 +2543,21 @@ mod tests {
         queue_1.apply(&mut world);
         assert!(world.contains_resource::<W<i32>>());
         assert!(world.contains_resource::<W<f64>>());
+    }
+
+    #[test]
+    fn run_system_cached_with_state() {
+        #[derive(Resource)]
+        struct R(usize);
+
+        let mut world = World::default();
+        world.insert_resource(R(0));
+        for i in 0..10 {
+            world
+                .commands()
+                .run_system_cached_with_state(move |mut r: ResMut<R>| r.0 += i);
+            world.flush();
+        }
+        assert_eq!(45, world.resource::<R>().0);
     }
 }

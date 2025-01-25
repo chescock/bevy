@@ -14,6 +14,8 @@ use bevy_reflect::Reflect;
 use core::marker::PhantomData;
 use thiserror::Error;
 
+use super::{In, StaticSystemParam, SystemParam, SystemParamFunction};
+
 /// A small wrapper for [`BoxedSystem`] that also keeps track whether or not the system has been initialized.
 #[derive(Component)]
 #[require(SystemIdMarker)]
@@ -453,6 +455,20 @@ impl World {
     {
         let id = self.register_system_cached(system);
         self.run_system_with(id, input)
+    }
+
+    /// TODO
+    pub fn run_system_cached_with_state<O, P, M, F>(
+        &mut self,
+        f: F,
+    ) -> Result<O, RegisteredSystemError<In<F>, O>>
+    where
+        F: SystemParamFunction<M, In = (), Out = O, Param = P>,
+        O: 'static,
+        P: SystemParam + 'static,
+    {
+        let system = |In(mut f): In<F>, p: StaticSystemParam<P>| f.run((), p.into_inner());
+        self.run_system_cached_with(system, f)
     }
 }
 
