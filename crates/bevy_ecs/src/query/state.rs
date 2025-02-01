@@ -13,7 +13,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, World, WorldId},
 };
 
-use alloc::vec::Vec;
+use alloc::{slice, vec::Vec};
 use core::{fmt, mem::MaybeUninit, ptr};
 use fixedbitset::FixedBitSet;
 use log::warn;
@@ -97,6 +97,24 @@ impl<D: QueryData, F: QueryFilter> fmt::Debug for QueryState<D, F> {
     }
 }
 
+impl<D: QueryData, F: QueryFilter> Clone for QueryState<D, F> {
+    fn clone(&self) -> Self {
+        Self {
+            world_id: self.world_id,
+            archetype_generation: self.archetype_generation,
+            matched_storage_ids: self.matched_storage_ids.clone(),
+            is_dense: self.is_dense,
+            fetch_state: self.fetch_state.clone(),
+            filter_state: self.filter_state.clone(),
+            component_access: self.component_access.clone(),
+            matched_tables: self.matched_tables.clone(),
+            matched_archetypes: self.matched_archetypes.clone(),
+            #[cfg(feature = "trace")]
+            par_iter_span: self.par_iter_span.clone(),
+        }
+    }
+}
+
 impl<D: QueryData, F: QueryFilter> FromWorld for QueryState<D, F> {
     fn from_world(world: &mut World) -> Self {
         world.query_filtered()
@@ -109,6 +127,14 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // SAFETY: invariant on `WorldQuery` trait upholds that `D::ReadOnly` and `F::ReadOnly`
         // have a subset of the access, and match the exact same archetypes/tables as `D`/`F` respectively.
         unsafe { self.as_transmuted_state::<D::ReadOnly, F>() }
+    }
+
+    /// Converts this `QueryState` slice to a `QueryState` that does not access anything mutably.
+    pub fn as_readonly_slice(slice: &[Self]) -> &[QueryState<D::ReadOnly, F>] {
+        let ptr = slice.as_ptr().cast::<QueryState<D::ReadOnly, F>>();
+        // SAFETY: invariant on `WorldQuery` trait upholds that `D::ReadOnly` and `F::ReadOnly`
+        // have a subset of the access, and match the exact same archetypes/tables as `D`/`F` respectively.
+        unsafe { slice::from_raw_parts(ptr, slice.len()) }
     }
 
     /// Converts this `QueryState` reference to a `QueryState` that does not return any data
@@ -212,7 +238,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// `new_archetype` and its variants must be called on all of the World's archetypes before the
     /// state can return valid query results.
-    fn new_uninitialized(world: &mut World) -> Self {
+    pub fn new_uninitialized(world: &mut World) -> Self {
         let fetch_state = D::init_state(world);
         let filter_state = F::init_state(world);
         Self::from_states_uninitialized(world, fetch_state, filter_state)
@@ -515,6 +541,40 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         }
     }
 
+    /// Returns `true` if the given `archetype` matches the query. Otherwise, returns `false`.
+    pub fn archetype_matches(&self, archetype: &Archetype) -> bool {
+        D::matches_component_set(&self.fetch_state, &|id| archetype.contains(id))
+            && F::matches_component_set(&self.filter_state, &|id| archetype.contains(id))
+            && self.matches_component_set(&|id| archetype.contains(id))
+    }
+
+    /// Process the given [`Archetype`] to update internal metadata about the [`Table`](crate::storage::Table)s
+    /// and [`Archetype`]s that are matched by this query.
+    ///
+    /// # Safety
+    /// `archetype` must be from the `World` this state was initialized from,
+    /// and must match the current query.
+    pub unsafe fn new_archetype_unchecked(&mut self, archetype: &Archetype) {
+        let archetype_index = archetype.id().index();
+        if !self.matched_archetypes.contains(archetype_index) {
+            self.matched_archetypes.grow_and_insert(archetype_index);
+            if !self.is_dense {
+                self.matched_storage_ids.push(StorageId {
+                    archetype_id: archetype.id(),
+                });
+            }
+        }
+        let table_index = archetype.table_id().as_usize();
+        if !self.matched_tables.contains(table_index) {
+            self.matched_tables.grow_and_insert(table_index);
+            if self.is_dense {
+                self.matched_storage_ids.push(StorageId {
+                    table_id: archetype.table_id(),
+                });
+            }
+        }
+    }
+
     /// Process the given [`Archetype`] to update internal metadata about the [`Table`](crate::storage::Table)s
     /// and [`Archetype`]s that are matched by this query.
     ///
@@ -524,28 +584,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// # Safety
     /// `archetype` must be from the `World` this state was initialized from.
     unsafe fn new_archetype_internal(&mut self, archetype: &Archetype) -> bool {
-        if D::matches_component_set(&self.fetch_state, &|id| archetype.contains(id))
-            && F::matches_component_set(&self.filter_state, &|id| archetype.contains(id))
-            && self.matches_component_set(&|id| archetype.contains(id))
-        {
-            let archetype_index = archetype.id().index();
-            if !self.matched_archetypes.contains(archetype_index) {
-                self.matched_archetypes.grow_and_insert(archetype_index);
-                if !self.is_dense {
-                    self.matched_storage_ids.push(StorageId {
-                        archetype_id: archetype.id(),
-                    });
-                }
-            }
-            let table_index = archetype.table_id().as_usize();
-            if !self.matched_tables.contains(table_index) {
-                self.matched_tables.grow_and_insert(table_index);
-                if self.is_dense {
-                    self.matched_storage_ids.push(StorageId {
-                        table_id: archetype.table_id(),
-                    });
-                }
-            }
+        if self.archetype_matches(archetype) {
+            self.new_archetype_unchecked(archetype);
             true
         } else {
             false

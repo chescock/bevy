@@ -92,7 +92,7 @@
 //! fn get_earthlings(mut query: QueryByIndex<Planet, Entity>) {
 //!     let earthlings = query.at(&Planet("Earth"));
 //!
-//!     for earthling in &earthlings.query() {
+//!     for earthling in &earthlings {
 //!         // ...
 //!     }
 //! }
@@ -142,7 +142,7 @@ use crate::{
 };
 use alloc::{format, vec::Vec};
 use bevy_ecs_macros::Resource;
-use bevy_platform_support::{collections::HashMap, hash::FixedHasher};
+use bevy_platform_support::{collections::HashMap, hash::FixedHasher, sync::Arc};
 use bevy_ptr::OwningPtr;
 use core::{alloc::Layout, hash::Hash, ptr::NonNull};
 
@@ -161,7 +161,7 @@ struct Index<C: IndexableComponent> {
     mapping: HashMap<C, usize>,
     /// A collection of ZST dynamic [`Component`]s which (in combination) uniquely address a _value_
     /// of `C` within the [`World`].
-    markers: Vec<ComponentId>,
+    markers: Arc<[ComponentId]>,
     /// A list of liveness counts.
     /// Once a value hits zero, it is free for reuse.
     /// If no values are zero, you must append to the end of the list.
@@ -180,7 +180,7 @@ impl<C: IndexableComponent> FromWorld for Index<C> {
 
         let markers = (0..bits)
             .map(|bit| Self::alloc_new_marker(world, bit, StorageType::Table))
-            .collect::<Vec<_>>();
+            .collect();
 
         Self {
             mapping: HashMap::with_hasher(FixedHasher),
