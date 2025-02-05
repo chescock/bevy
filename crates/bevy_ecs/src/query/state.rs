@@ -84,11 +84,7 @@ pub struct QueryState<D: QueryData, F: QueryFilter = ()> {
     par_iter_span: Span,
 }
 
-impl<D: QueryData, F: QueryFilter> Clone for QueryState<D, F>
-where
-    D::State: Clone,
-    F::State: Clone,
-{
+impl<D: QueryData, F: QueryFilter> Clone for QueryState<D, F> {
     fn clone(&self) -> Self {
         Self {
             world_id: self.world_id,

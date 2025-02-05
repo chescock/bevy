@@ -294,8 +294,6 @@ pub struct QueryByIndexState<
 // SAFETY: We rely on the known-safe implementations of `SystemParam` for `Res` and `Query`.
 unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: QueryFilter + 'static>
     SystemParam for QueryByIndex<'_, '_, C, D, F>
-where
-    QueryState<D, (F, With<C>)>: Clone,
 {
     type State = QueryByIndexState<C, D, F>;
     type Item<'w, 's> = QueryByIndex<'w, 's, C, D, F>;

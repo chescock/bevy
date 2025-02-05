@@ -158,6 +158,15 @@ pub fn derive_query_filter_impl(input: TokenStream) -> TokenStream {
                 #(#named_field_idents: <#field_types as #path::query::WorldQuery>::State,)*
             }
 
+            impl #user_impl_generics Clone for #state_struct_name #user_ty_generics
+                #user_where_clauses {
+                fn clone(&self) -> Self {
+                    Self {
+                        #(#named_field_idents: self.#named_field_idents.clone(),)*
+                    }
+                }
+            }
+
             #world_query_impl
 
             #filter_impl

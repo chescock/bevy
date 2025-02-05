@@ -148,6 +148,16 @@ pub struct AssetChangedState<A: AsAssetId> {
     _asset: PhantomData<fn(A)>,
 }
 
+impl<A: AsAssetId> Clone for AssetChangedState<A> {
+    fn clone(&self) -> Self {
+        Self {
+            asset_id: self.asset_id,
+            resource_id: self.resource_id,
+            _asset: self._asset,
+        }
+    }
+}
+
 #[expect(unsafe_code, reason = "WorldQuery is an unsafe trait.")]
 /// SAFETY: `ROQueryFetch<Self>` is the same as `QueryFetch<Self>`
 unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
