@@ -4,7 +4,7 @@ use crate::{
     archetype::Archetype,
     component::{ComponentId, Immutable, Tick},
     prelude::Component,
-    query::{QueryData, QueryFilter, QueryState, With},
+    query::{QueryData, QueryFilter, QueryState, ReadOnlyQueryData, With},
     system::{init_query_param, Query, Res, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -63,10 +63,27 @@ pub struct QueryByIndex<
     index: &'world Index<C>,
 }
 
-impl<'s, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
-    QueryByIndex<'_, 's, C, D, F>
+impl<C: Component<Mutability = Immutable>, D: ReadOnlyQueryData, F: QueryFilter> Clone
+    for QueryByIndex<'_, '_, C, D, F>
+{
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C: Component<Mutability = Immutable>, D: ReadOnlyQueryData, F: QueryFilter> Copy
+    for QueryByIndex<'_, '_, C, D, F>
+{
+}
+
+impl<'w, 's, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
+    QueryByIndex<'w, 's, C, D, F>
 {
     /// Return a [`Query`] only returning entities with a component `C` of the provided value.
+    ///
+    /// # See also
+    /// - [`at_inner`](Self::at) for mutable query items with the actual "inner" world lifetime.
+    /// - [`at`](Self::at) for read-only query items.
     ///
     /// # Examples
     ///
@@ -75,11 +92,7 @@ impl<'s, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
     /// # let mut world = World::new();
     /// #[derive(Component, PartialEq, Eq, Hash, Clone)]
     /// #[component(immutable)]
-    /// enum FavoriteColor {
-    ///     Red,
-    ///     Green,
-    ///     Blue,
-    /// }
+    /// enum FavoriteColor { Red, Green, Blue }
     ///
     /// world.add_index::<FavoriteColor>();
     ///
@@ -90,20 +103,14 @@ impl<'s, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
     /// }
     /// ```
     pub fn at_mut(&mut self, value: &C) -> Query<'_, 's, D, (F, With<C>)> {
-        // SAFETY: We have registered all of the query's world accesses,
-        // so the caller ensures that `world` has permission to access any
-        // world data that the query needs.
-        unsafe {
-            Query::new(
-                self.world,
-                self.state_for_value(value),
-                self.last_run,
-                self.this_run,
-            )
-        }
+        self.reborrow().at_inner(value)
     }
 
     /// Return a read-only [`Query`] only returning entities with a component `C` of the provided value.
+    ///
+    /// # See also
+    /// - [`at_inner`](Self::at) for mutable query items with the actual "inner" world lifetime.
+    /// - [`at_mut`](Self::at) for mutable query items.
     ///
     /// # Examples
     ///
@@ -112,11 +119,7 @@ impl<'s, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
     /// # let mut world = World::new();
     /// #[derive(Component, PartialEq, Eq, Hash, Clone)]
     /// #[component(immutable)]
-    /// enum FavoriteColor {
-    ///     Red,
-    ///     Green,
-    ///     Blue,
-    /// }
+    /// enum FavoriteColor { Red, Green, Blue }
     ///
     /// world.add_index::<FavoriteColor>();
     ///
@@ -127,27 +130,147 @@ impl<'s, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
     /// }
     /// ```
     pub fn at(&self, value: &C) -> Query<'_, 's, D::ReadOnly, (F, With<C>)> {
-        // SAFETY: We have registered all of the query's world accesses,
-        // so the caller ensures that `world` has permission to access any
-        // world data that the query needs.
-        unsafe {
-            Query::new(
-                self.world,
-                self.state_for_value(value).as_readonly(),
-                self.last_run,
-                self.this_run,
-            )
-        }
+        self.as_readonly().at_inner(value)
     }
 
-    fn state_for_value(&self, value: &C) -> &'s QueryState<D, (F, With<C>)> {
+    /// Return a [`Query`] only returning entities with a component `C` of the provided value.
+    /// This version is `unsafe` because it only requires `&self`.
+    /// It can be used to perform mutable queries on different index values concurrently.
+    ///
+    /// # Safety
+    ///
+    /// This function makes it possible to violate Rust's aliasing guarantees.
+    /// You must make sure this call does not result in multiple mutable references to the same component.
+    ///
+    /// # See also
+    /// - [`at_inner`](Self::at) for mutable query items with the actual "inner" world lifetime.
+    /// - [`at`](Self::at) for read-only query items.
+    /// - [`at_mut`](Self::at) for mutable query items.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use bevy_ecs::prelude::*;
+    /// # let mut world = World::new();
+    /// #[derive(Component, PartialEq, Eq, Hash, Clone)]
+    /// #[component(immutable)]
+    /// enum FavoriteColor { Red, Green, Blue }
+    ///
+    /// #[derive(Component)]
+    /// struct FavoriteNumber(usize);
+    ///
+    /// world.add_index::<FavoriteColor>();
+    ///
+    /// fn find_red_fans(query: QueryByIndex<FavoriteColor, &mut FavoriteNumber>) {
+    ///     // SAFETY: The first call to `at_unsafe` only queries entities with `FavoriteColor::Red`,
+    ///     // and the second only queries entities with `FavoriteColor::Green`,
+    ///     // so we never have multiple references to the same entity at the same time.
+    ///     for red_number in unsafe { query.at_unsafe(&FavoriteColor::Red) }.iter_mut() {
+    ///         for green_number in unsafe { query.at_unsafe(&FavoriteColor::Green) }.iter_mut() {
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub unsafe fn at_unsafe(&self, value: &C) -> Query<'_, 's, D, (F, With<C>)> {
+        // SAFETY: The caller promises that this will not result in multiple mutable references.
+        unsafe { self.reborrow_unsafe() }.at_inner(value)
+    }
+
+    /// Return a [`Query`] only returning entities with a component `C` of the provided value,
+    /// with the actual "inner" world lifetime.
+    /// This is most useful when working with a [`SystemState`](crate::system::SystemState)
+    /// and using [`Query::iter_inner()`](crate::system::Query::iter_inner).
+    ///
+    /// # See also
+    /// - [`at`](Self::at) for read-only query items.
+    /// - [`at_mut`](Self::at) for mutable query items.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use bevy_ecs::{prelude::*, system::SystemState};
+    /// # let mut world = World::new();
+    /// #
+    /// #[derive(Component, PartialEq, Eq, Hash, Clone)]
+    /// #[component(immutable)]
+    /// enum FavoriteColor { Red, Green, Blue }
+    ///
+    /// #[derive(Component)]
+    /// struct FavoriteNumber(usize);
+    ///
+    /// world.add_index::<FavoriteColor>();
+    ///
+    /// let number: Option<&FavoriteNumber> = {
+    ///     // `state` is only alive during this block,
+    ///     // but we use it to return a reference from `world`.
+    ///     // Using `at()` instead of `at_inner()` fails with "`query` does not live long enough".
+    ///     let mut state =
+    ///         SystemState::<QueryByIndex<FavoriteColor, &FavoriteNumber>>::new(&mut world);
+    ///     let query = state.get_mut(&mut world);
+    ///     query.at_inner(&FavoriteColor::Red).iter_inner().next()
+    /// };
+    /// ```
+    pub fn at_inner(self, value: &C) -> Query<'w, 's, D, (F, With<C>)> {
         let index = self.index.mapping.get(value);
         // If the value was not found in the mapping, there are no matching entities and we can use the empty state.
         // If the value was found but was out of range, then we have not seen any archetypes matching it yet,
         // so we can still use the empty state.
-        index
+        let state = index
             .and_then(|index| self.query_states.get(index))
-            .unwrap_or(self.empty_query_state)
+            .unwrap_or(self.empty_query_state);
+        // SAFETY: We have registered all of the query's world accesses,
+        // so the caller ensures that `world` has permission to access any
+        // world data that the query needs.
+        unsafe { Query::new(self.world, state, self.last_run, self.this_run) }
+    }
+
+    /// Returns another `QueryByIndex` from this that fetches the read-only version of the query items.
+    pub fn as_readonly(&self) -> QueryByIndex<'_, 's, C, D::ReadOnly, F> {
+        // SAFETY: The reborrowed query is converted to read-only, so it cannot perform mutable access,
+        // and the original query is held with a shared borrow, so it cannot perform mutable access either.
+        unsafe { self.reborrow_unsafe() }.into_readonly()
+    }
+
+    /// Returns another `QueryByIndex` from this that fetches the read-only version of the query items.
+    pub fn into_readonly(self) -> QueryByIndex<'w, 's, C, D::ReadOnly, F> {
+        QueryByIndex {
+            world: self.world,
+            empty_query_state: self.empty_query_state.as_readonly(),
+            query_states: QueryState::as_readonly_slice(self.query_states),
+            last_run: self.last_run,
+            this_run: self.this_run,
+            index: self.index,
+        }
+    }
+
+    /// Returns a new `QueryByIndex` reborrowing the access from this one. The current query will be unusable
+    /// while the new one exists.
+    pub fn reborrow(&mut self) -> QueryByIndex<'_, 's, C, D, F> {
+        // SAFETY: this query is exclusively borrowed while the new one exists, so
+        // no overlapping access can occur.
+        unsafe { self.reborrow_unsafe() }
+    }
+
+    /// Returns a new `Query` reborrowing the access from this one.
+    /// The current query will still be usable while the new one exists, but must not be used in a way that violates aliasing.
+    ///
+    /// # Safety
+    ///
+    /// This function makes it possible to violate Rust's aliasing guarantees.
+    /// You must make sure this call does not result in a mutable or shared reference to a component with a mutable reference.
+    ///
+    /// # See also
+    ///
+    /// - [`reborrow`](Self::reborrow) for the safe versions.
+    pub unsafe fn reborrow_unsafe(&self) -> QueryByIndex<'_, 's, C, D, F> {
+        QueryByIndex {
+            world: self.world,
+            empty_query_state: self.empty_query_state,
+            query_states: self.query_states,
+            last_run: self.last_run,
+            this_run: self.this_run,
+            index: self.index,
+        }
     }
 }
 

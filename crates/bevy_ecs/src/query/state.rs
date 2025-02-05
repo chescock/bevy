@@ -13,7 +13,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, World, WorldId},
 };
 
-use alloc::vec::Vec;
+use alloc::{slice, vec::Vec};
 use core::{fmt, mem::MaybeUninit, ptr};
 use fixedbitset::FixedBitSet;
 use log::warn;
@@ -131,6 +131,14 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // SAFETY: invariant on `WorldQuery` trait upholds that `D::ReadOnly` and `F::ReadOnly`
         // have a subset of the access, and match the exact same archetypes/tables as `D`/`F` respectively.
         unsafe { self.as_transmuted_state::<D::ReadOnly, F>() }
+    }
+
+    /// Converts this `QueryState` slice to a `QueryState` that does not access anything mutably.
+    pub fn as_readonly_slice(slice: &[Self]) -> &[QueryState<D::ReadOnly, F>] {
+        let ptr = slice.as_ptr().cast::<QueryState<D::ReadOnly, F>>();
+        // SAFETY: invariant on `WorldQuery` trait upholds that `D::ReadOnly` and `F::ReadOnly`
+        // have a subset of the access, and match the exact same archetypes/tables as `D`/`F` respectively.
+        unsafe { slice::from_raw_parts(ptr, slice.len()) }
     }
 
     /// Converts this `QueryState` reference to a `QueryState` that does not return any data
