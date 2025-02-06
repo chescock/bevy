@@ -1677,7 +1677,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &mut self,
         world: &'w World,
     ) -> Result<ROQueryItem<'w, D>, QuerySingleError> {
-        self.single(world)
+        self.query(world).single_inner()
     }
 
     /// Returns a single mutable query result when there is exactly one entity matching
@@ -1703,7 +1703,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &mut self,
         world: &'w mut World,
     ) -> Result<D::Item<'w>, QuerySingleError> {
-        self.single_mut(world)
+        self.query_mut(world).single_inner()
     }
 
     /// Returns a query result when there is exactly one entity matching the query.
@@ -1770,7 +1770,7 @@ mod tests {
         let world_2 = World::new();
 
         let mut query_state = world_1.query::<Entity>();
-        let _panics = query_state.get(&world_2, Entity::from_raw(0));
+        let _panics = query_state.query(&world_2).get_inner(Entity::from_raw(0));
     }
 
     #[test]
@@ -1780,7 +1780,7 @@ mod tests {
         let world_2 = World::new();
 
         let mut query_state = world_1.query::<Entity>();
-        let _panics = query_state.get_many(&world_2, []);
+        let _panics = query_state.query(&world_2).get_many_inner([]);
     }
 
     #[test]
@@ -1790,7 +1790,7 @@ mod tests {
         let mut world_2 = World::new();
 
         let mut query_state = world_1.query::<Entity>();
-        let _panics = query_state.get_many_mut(&mut world_2, []);
+        let _panics = query_state.query_mut(&mut world_2).get_many_inner([]);
     }
 
     #[derive(Component, PartialEq, Debug)]
@@ -1809,8 +1809,8 @@ mod tests {
 
         let query_state = world.query::<(&A, &B)>();
         let mut new_query_state = query_state.transmute::<&A>(&world);
-        assert_eq!(new_query_state.iter(&world).len(), 1);
-        let a = new_query_state.single(&world).unwrap();
+        assert_eq!(new_query_state.query(&world).into_iter().len(), 1);
+        let a = new_query_state.query(&world).single_inner().unwrap();
 
         assert_eq!(a.0, 1);
     }
@@ -1824,7 +1824,7 @@ mod tests {
         let query_state = world.query_filtered::<(&A, &B), Without<C>>();
         let mut new_query_state = query_state.transmute::<&A>(&world);
         // even though we change the query to not have Without<C>, we do not get the component with C.
-        let a = new_query_state.single(&world).unwrap();
+        let a = new_query_state.query(&world).single_inner().unwrap();
 
         assert_eq!(a.0, 0);
     }
@@ -1837,7 +1837,7 @@ mod tests {
 
         let q = world.query::<()>();
         let mut q = q.transmute::<Entity>(&world);
-        assert_eq!(q.single(&world).unwrap(), entity);
+        assert_eq!(q.query(&world).single_inner().unwrap(), entity);
     }
 
     #[test]
@@ -1847,7 +1847,7 @@ mod tests {
 
         let q = world.query::<&A>();
         let mut new_q = q.transmute::<Ref<A>>(&world);
-        assert!(new_q.single(&world).unwrap().is_added());
+        assert!(new_q.query(&world).single_inner().unwrap().is_added());
 
         let q = world.query::<Ref<A>>();
         let _ = q.transmute::<&A>(&world);
@@ -1918,7 +1918,7 @@ mod tests {
 
         let query_state = world.query::<Option<&A>>();
         let mut new_query_state = query_state.transmute::<&A>(&world);
-        let x = new_query_state.single(&world).unwrap();
+        let x = new_query_state.query(&world).single_inner().unwrap();
         assert_eq!(x.0, 1234);
     }
 
@@ -1943,7 +1943,7 @@ mod tests {
 
         let mut query = query;
         // Our result is completely untyped
-        let entity_ref = query.single(&world).unwrap();
+        let entity_ref = query.query(&world).single_inner().unwrap();
 
         assert_eq!(entity, entity_ref.id());
         assert_eq!(0, entity_ref.get::<A>().unwrap().0);
@@ -1958,16 +1958,22 @@ mod tests {
         let mut query = QueryState::<(Entity, &A, Has<B>)>::new(&mut world)
             .transmute_filtered::<(Entity, Has<B>), Added<A>>(&world);
 
-        assert_eq!((entity_a, false), query.single(&world).unwrap());
+        assert_eq!(
+            (entity_a, false),
+            query.query(&world).single_inner().unwrap()
+        );
 
         world.clear_trackers();
 
         let entity_b = world.spawn((A(0), B(0))).id();
-        assert_eq!((entity_b, true), query.single(&world).unwrap());
+        assert_eq!(
+            (entity_b, true),
+            query.query(&world).single_inner().unwrap()
+        );
 
         world.clear_trackers();
 
-        assert!(query.single(&world).is_err());
+        assert!(query.query(&world).single_inner().is_err());
     }
 
     #[test]
@@ -1979,15 +1985,21 @@ mod tests {
             .transmute_filtered::<Entity, Changed<A>>(&world);
 
         let mut change_query = QueryState::<&mut A>::new(&mut world);
-        assert_eq!(entity_a, detection_query.single(&world).unwrap());
+        assert_eq!(
+            entity_a,
+            detection_query.query(&world).single_inner().unwrap()
+        );
 
         world.clear_trackers();
 
-        assert!(detection_query.single(&world).is_err());
+        assert!(detection_query.query(&world).single_inner().is_err());
 
-        change_query.single_mut(&mut world).unwrap().0 = 1;
+        change_query.query_mut(&mut world).single_inner().unwrap().0 = 1;
 
-        assert_eq!(entity_a, detection_query.single(&world).unwrap());
+        assert_eq!(
+            entity_a,
+            detection_query.query(&world).single_inner().unwrap()
+        );
     }
 
     #[test]
@@ -2034,7 +2046,7 @@ mod tests {
             .query_filtered::<&Dense, With<Sparse>>()
             .transmute::<&Dense>(&world);
 
-        let matched = query.iter(&world).count();
+        let matched = query.query(&world).into_iter().count();
         assert_eq!(matched, 1);
     }
     #[test]
@@ -2058,7 +2070,7 @@ mod tests {
         // Note: `transmute_filtered` is supposed to keep the same matched tables/archetypes,
         // so it doesn't actually filter out those entities without `Sparse` and the iteration
         // remains dense.
-        let matched = query.iter(&world).count();
+        let matched = query.query(&world).into_iter().count();
         assert_eq!(matched, 2);
     }
 
@@ -2074,7 +2086,7 @@ mod tests {
         let query_2 = QueryState::<&B, Without<C>>::new(&mut world);
         let mut new_query: QueryState<Entity, ()> = query_1.join_filtered(&world, &query_2);
 
-        assert_eq!(new_query.single(&world).unwrap(), entity_ab);
+        assert_eq!(new_query.query(&world).single_inner().unwrap(), entity_ab);
     }
 
     #[test]
@@ -2089,9 +2101,9 @@ mod tests {
         let query_2 = QueryState::<&B, Without<C>>::new(&mut world);
         let mut new_query: QueryState<Entity, ()> = query_1.join_filtered(&world, &query_2);
 
-        assert!(new_query.get(&world, entity_ab).is_ok());
+        assert!(new_query.query(&world).get_inner(entity_ab).is_ok());
         // should not be able to get entity with c.
-        assert!(new_query.get(&world, entity_abc).is_err());
+        assert!(new_query.query(&world).get_inner(entity_abc).is_err());
     }
 
     #[test]
@@ -2133,19 +2145,19 @@ mod tests {
 
         // Without<C> only matches the first entity
         let mut query = QueryState::<()>::new(&mut world);
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         // With<C> matches the last two entities
         let mut query = QueryState::<(), With<C>>::new(&mut world);
-        assert_eq!(2, query.iter(&world).count());
+        assert_eq!(2, query.query(&world).into_iter().count());
 
         // Has should bypass the filter entirely
         let mut query = QueryState::<Has<C>>::new(&mut world);
-        assert_eq!(3, query.iter(&world).count());
+        assert_eq!(3, query.query(&world).into_iter().count());
 
         // Other filters should still be respected
         let mut query = QueryState::<Has<C>, Without<B>>::new(&mut world);
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
     }
 
     #[derive(Component)]
@@ -2165,7 +2177,7 @@ mod tests {
         let mut query = QueryState::<()>::new(&mut world);
         // There are no sparse components involved thus the query is dense
         assert!(query.is_dense);
-        assert_eq!(3, query.iter(&world).count());
+        assert_eq!(3, query.query(&world).into_iter().count());
 
         let mut df = DefaultQueryFilters::empty();
         df.register_disabling_component(world.register_component::<Sparse>());
@@ -2175,7 +2187,7 @@ mod tests {
         // The query doesn't ask for sparse components, but the default filters adds
         // a sparse components thus it is NOT dense
         assert!(!query.is_dense);
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         let mut df = DefaultQueryFilters::empty();
         df.register_disabling_component(world.register_component::<Table>());
@@ -2184,11 +2196,11 @@ mod tests {
         let mut query = QueryState::<()>::new(&mut world);
         // If the filter is instead a table components, the query can still be dense
         assert!(query.is_dense);
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         let mut query = QueryState::<&Sparse>::new(&mut world);
         // But only if the original query was dense
         assert!(!query.is_dense);
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
     }
 }

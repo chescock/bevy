@@ -107,7 +107,7 @@ pub fn world_query_get(criterion: &mut Criterion) {
             bencher.iter(|| {
                 for i in 0..entity_count {
                     let entity = Entity::from_raw(i);
-                    assert!(query.get(&world, entity).is_ok());
+                    assert!(query.query(&world).get_inner(entity).is_ok());
                 }
             });
         });
@@ -132,7 +132,7 @@ pub fn world_query_get(criterion: &mut Criterion) {
             bencher.iter(|| {
                 for i in 0..entity_count {
                     let entity = Entity::from_raw(i);
-                    assert!(query.get(&world, entity).is_ok());
+                    assert!(query.query(&world).get_inner(entity).is_ok());
                 }
             });
         });
@@ -143,7 +143,7 @@ pub fn world_query_get(criterion: &mut Criterion) {
             bencher.iter(|| {
                 for i in 0..entity_count {
                     let entity = Entity::from_raw(i);
-                    assert!(query.get(&world, entity).is_ok());
+                    assert!(query.query(&world).get_inner(entity).is_ok());
                 }
             });
         });
@@ -170,7 +170,7 @@ pub fn world_query_get(criterion: &mut Criterion) {
                 bencher.iter(|| {
                     for i in 0..entity_count {
                         let entity = Entity::from_raw(i);
-                        assert!(query.get(&world, entity).is_ok());
+                        assert!(query.query(&world).get_inner(entity).is_ok());
                     }
                 });
             },
@@ -192,7 +192,7 @@ pub fn world_query_iter(criterion: &mut Criterion) {
 
             bencher.iter(|| {
                 let mut count = 0;
-                for comp in query.iter(&world) {
+                for comp in query.query(&world) {
                     black_box(comp);
                     count += 1;
                     black_box(count);
@@ -206,7 +206,7 @@ pub fn world_query_iter(criterion: &mut Criterion) {
 
             bencher.iter(|| {
                 let mut count = 0;
-                for comp in query.iter(&world) {
+                for comp in query.query(&world) {
                     black_box(comp);
                     count += 1;
                     black_box(count);
@@ -231,7 +231,7 @@ pub fn world_query_for_each(criterion: &mut Criterion) {
 
             bencher.iter(|| {
                 let mut count = 0;
-                query.iter(&world).for_each(|comp| {
+                query.query(&world).into_iter().for_each(|comp| {
                     black_box(comp);
                     count += 1;
                     black_box(count);
@@ -245,7 +245,7 @@ pub fn world_query_for_each(criterion: &mut Criterion) {
 
             bencher.iter(|| {
                 let mut count = 0;
-                query.iter(&world).for_each(|comp| {
+                query.query(&world).into_iter().for_each(|comp| {
                     black_box(comp);
                     count += 1;
                     black_box(count);

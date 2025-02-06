@@ -29,8 +29,11 @@ impl<'w> Benchmark<'w> {
 
     #[inline(never)]
     pub fn run(&mut self) {
-        self.1.iter_mut(&mut self.0).for_each(|mut data| {
-            data.0 *= 2.0;
-        });
+        self.1
+            .query_mut(&mut self.0)
+            .into_iter()
+            .for_each(|mut data| {
+                data.0 *= 2.0;
+            });
     }
 }

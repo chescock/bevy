@@ -2234,10 +2234,16 @@ impl ShadowPassNode {
 
         let time_span = diagnostics.time_span(render_context.command_encoder(), "shadows");
 
-        if let Ok(view_lights) = self.main_view_query.get_manual(world, view_entity) {
+        if let Ok(view_lights) = self
+            .main_view_query
+            .query_manual(world)
+            .get_inner(view_entity)
+        {
             for view_light_entity in view_lights.lights.iter().copied() {
-                let Ok((view_light, extracted_light_view, occlusion_culling)) =
-                    self.view_light_query.get_manual(world, view_light_entity)
+                let Ok((view_light, extracted_light_view, occlusion_culling)) = self
+                    .view_light_query
+                    .query_manual(world)
+                    .get_inner(view_light_entity)
                 else {
                     continue;
                 };

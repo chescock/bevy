@@ -447,7 +447,9 @@ impl<T: Event> ApplicationHandler<T> for WinitAppRunnerState<T> {
         }
 
         let mut windows = self.world_mut().query::<(&mut Window, &mut CachedWindow)>();
-        if let Ok((window_component, mut cache)) = windows.get_mut(self.world_mut(), window) {
+        if let Ok((window_component, mut cache)) =
+            windows.query_mut(self.world_mut()).get_inner(window)
+        {
             if window_component.is_changed() {
                 cache.window = window_component.clone();
             }

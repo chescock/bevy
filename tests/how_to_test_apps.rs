@@ -76,7 +76,11 @@ fn test_player_spawn() {
     // Now that the startup systems have run, we can check if the player has
     // spawned as expected.
     let expected = Player::default();
-    let actual = app.world_mut().query::<&Player>().single(app.world());
+    let actual = app
+        .world_mut()
+        .query::<&Player>()
+        .query(app.world())
+        .single_inner();
     assert!(actual.is_ok(), "There should be exactly 1 player.");
     assert_eq!(
         expected.mana,
@@ -101,7 +105,8 @@ fn test_spell_casting() {
     let actual = app
         .world_mut()
         .query::<&Player>()
-        .single(app.world())
+        .query(app.world())
+        .single_inner()
         .unwrap();
     assert_eq!(
         expected.mana - 1,
@@ -119,7 +124,8 @@ fn test_spell_casting() {
     let after_keypress_event = app
         .world_mut()
         .query::<&Player>()
-        .single(app.world())
+        .query(app.world())
+        .single_inner()
         .unwrap();
     assert_eq!(
         expected.mana - 1,
@@ -138,7 +144,8 @@ fn test_window_title() {
     let window = app
         .world_mut()
         .query::<&Window>()
-        .single(app.world())
+        .query(app.world())
+        .single_inner()
         .unwrap();
     assert_eq!(window.title, "This is window 0!");
 }

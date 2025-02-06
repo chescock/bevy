@@ -537,9 +537,9 @@ mod tests {
         let mut q = render_world.query_filtered::<Entity, With<MainEntity>>();
 
         // Only one synchronized entity
-        assert!(q.iter(&render_world).count() == 1);
+        assert!(q.query(&render_world).into_iter().count() == 1);
 
-        let render_entity = q.single(&render_world).unwrap();
+        let render_entity = q.query(&render_world).single_inner().unwrap();
         let render_entity_component = main_world.get::<RenderEntity>(main_entity).unwrap();
 
         assert!(render_entity_component.id() == render_entity);
@@ -556,6 +556,6 @@ mod tests {
         entity_sync_system(&mut main_world, &mut render_world);
 
         // Only one synchronized entity
-        assert!(q.iter(&render_world).count() == 0);
+        assert!(q.query(&render_world).into_iter().count() == 0);
     }
 }

@@ -33,7 +33,7 @@ use super::{FilteredAccess, QueryData, QueryFilter};
 ///     .build();
 ///
 /// // Consume the QueryState
-/// let (entity, b) = query.single(&world).unwrap();
+/// let (entity, b) = query.query(&world).single_inner().unwrap();
 /// ```
 pub struct QueryBuilder<'w, D: QueryData = (), F: QueryFilter = ()> {
     access: FilteredAccess<ComponentId>,
@@ -297,13 +297,13 @@ mod tests {
             .with::<A>()
             .without::<C>()
             .build();
-        assert_eq!(entity_a, query_a.single(&world).unwrap());
+        assert_eq!(entity_a, query_a.query(&world).single_inner().unwrap());
 
         let mut query_b = QueryBuilder::<Entity>::new(&mut world)
             .with::<A>()
             .without::<B>()
             .build();
-        assert_eq!(entity_b, query_b.single(&world).unwrap());
+        assert_eq!(entity_b, query_b.query(&world).single_inner().unwrap());
     }
 
     #[test]
@@ -319,13 +319,13 @@ mod tests {
             .with_id(component_id_a)
             .without_id(component_id_c)
             .build();
-        assert_eq!(entity_a, query_a.single(&world).unwrap());
+        assert_eq!(entity_a, query_a.query(&world).single_inner().unwrap());
 
         let mut query_b = QueryBuilder::<Entity>::new(&mut world)
             .with_id(component_id_a)
             .without_id(component_id_b)
             .build();
-        assert_eq!(entity_b, query_b.single(&world).unwrap());
+        assert_eq!(entity_b, query_b.query(&world).single_inner().unwrap());
     }
 
     #[test]
@@ -341,7 +341,7 @@ mod tests {
                 builder.with::<B>();
             })
             .build();
-        assert_eq!(2, query_a.iter(&world).count());
+        assert_eq!(2, query_a.query(&world).into_iter().count());
 
         let mut query_b = QueryBuilder::<Entity>::new(&mut world)
             .or(|builder| {
@@ -350,7 +350,7 @@ mod tests {
             })
             .build();
         dbg!(&query_b.component_access);
-        assert_eq!(2, query_b.iter(&world).count());
+        assert_eq!(2, query_b.query(&world).into_iter().count());
 
         let mut query_c = QueryBuilder::<Entity>::new(&mut world)
             .or(|builder| {
@@ -359,7 +359,7 @@ mod tests {
                 builder.with::<C>();
             })
             .build();
-        assert_eq!(3, query_c.iter(&world).count());
+        assert_eq!(3, query_c.query(&world).into_iter().count());
     }
 
     #[test]
@@ -372,7 +372,10 @@ mod tests {
             .transmute::<&A>()
             .build();
 
-        query.iter(&world).for_each(|a| assert_eq!(a.0, 1));
+        query
+            .query(&world)
+            .into_iter()
+            .for_each(|a| assert_eq!(a.0, 1));
     }
 
     #[test]
@@ -385,7 +388,7 @@ mod tests {
             .data::<&B>()
             .build();
 
-        let entity_ref = query.single(&world).unwrap();
+        let entity_ref = query.query(&world).single_inner().unwrap();
 
         assert_eq!(entity, entity_ref.id());
 
@@ -408,7 +411,7 @@ mod tests {
             .ref_id(component_id_b)
             .build();
 
-        let entity_ref = query.single(&world).unwrap();
+        let entity_ref = query.query(&world).single_inner().unwrap();
 
         assert_eq!(entity, entity_ref.id());
 
@@ -441,7 +444,7 @@ mod tests {
             .with::<Sparse>()
             .build();
 
-        let matched = query.iter(&world).count();
+        let matched = query.query(&world).into_iter().count();
         assert_eq!(matched, 1);
     }
 }

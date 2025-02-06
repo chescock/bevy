@@ -67,7 +67,7 @@ impl<'w> Benchmark<'w> {
 
     #[inline(never)]
     pub fn run(&mut self) {
-        for mut data in self.1.iter_mut(&mut self.0) {
+        for mut data in self.1.query_mut(&mut self.0) {
             data.0 .0 *= 2.0;
             data.1 .0 *= 2.0;
             data.2 .0 *= 2.0;

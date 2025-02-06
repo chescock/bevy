@@ -900,53 +900,53 @@ mod test {
 
         let mut q = world.query::<Ref<InheritedVisibility>>();
 
-        assert!(!q.get(&world, id1).unwrap().is_changed());
-        assert!(!q.get(&world, id2).unwrap().is_changed());
-        assert!(!q.get(&world, id3).unwrap().is_changed());
-        assert!(!q.get(&world, id4).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id1).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id2).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id3).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id4).unwrap().is_changed());
 
         world.clear_trackers();
         world.entity_mut(id1).insert(Visibility::Hidden);
         schedule.run(&mut world);
 
-        assert!(q.get(&world, id1).unwrap().is_changed());
-        assert!(q.get(&world, id2).unwrap().is_changed());
-        assert!(!q.get(&world, id3).unwrap().is_changed());
-        assert!(!q.get(&world, id4).unwrap().is_changed());
+        assert!(q.query(&world).get_inner(id1).unwrap().is_changed());
+        assert!(q.query(&world).get_inner(id2).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id3).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id4).unwrap().is_changed());
 
         world.clear_trackers();
         schedule.run(&mut world);
 
-        assert!(!q.get(&world, id1).unwrap().is_changed());
-        assert!(!q.get(&world, id2).unwrap().is_changed());
-        assert!(!q.get(&world, id3).unwrap().is_changed());
-        assert!(!q.get(&world, id4).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id1).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id2).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id3).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id4).unwrap().is_changed());
 
         world.clear_trackers();
         world.entity_mut(id3).insert(Visibility::Inherited);
         schedule.run(&mut world);
 
-        assert!(!q.get(&world, id1).unwrap().is_changed());
-        assert!(!q.get(&world, id2).unwrap().is_changed());
-        assert!(!q.get(&world, id3).unwrap().is_changed());
-        assert!(!q.get(&world, id4).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id1).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id2).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id3).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id4).unwrap().is_changed());
 
         world.clear_trackers();
         world.entity_mut(id2).insert(Visibility::Visible);
         schedule.run(&mut world);
 
-        assert!(!q.get(&world, id1).unwrap().is_changed());
-        assert!(q.get(&world, id2).unwrap().is_changed());
-        assert!(q.get(&world, id3).unwrap().is_changed());
-        assert!(q.get(&world, id4).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id1).unwrap().is_changed());
+        assert!(q.query(&world).get_inner(id2).unwrap().is_changed());
+        assert!(q.query(&world).get_inner(id3).unwrap().is_changed());
+        assert!(q.query(&world).get_inner(id4).unwrap().is_changed());
 
         world.clear_trackers();
         schedule.run(&mut world);
 
-        assert!(!q.get(&world, id1).unwrap().is_changed());
-        assert!(!q.get(&world, id2).unwrap().is_changed());
-        assert!(!q.get(&world, id3).unwrap().is_changed());
-        assert!(!q.get(&world, id4).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id1).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id2).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id3).unwrap().is_changed());
+        assert!(!q.query(&world).get_inner(id4).unwrap().is_changed());
     }
 
     #[test]

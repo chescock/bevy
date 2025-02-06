@@ -2203,7 +2203,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2213,7 +2214,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<(&Gamepad, &GamepadSettings)>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             1
         );
@@ -2226,7 +2228,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2236,7 +2239,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<(&Gamepad, &GamepadSettings)>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             1
         );
@@ -2247,14 +2251,16 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_err());
         // Settings should be kept
         assert!(ctx
             .app
             .world_mut()
             .query::<&GamepadSettings>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_ok());
 
         // Mistakenly sending a second disconnection event shouldn't break anything
@@ -2264,13 +2270,15 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_err());
         assert!(ctx
             .app
             .world_mut()
             .query::<&GamepadSettings>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_ok());
     }
 
@@ -2281,7 +2289,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2293,14 +2302,16 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_err());
         // Settings should be kept
         assert!(ctx
             .app
             .world_mut()
             .query::<&GamepadSettings>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_ok());
     }
 
@@ -2312,7 +2323,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2322,7 +2334,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&mut GamepadSettings>()
-            .get_mut(ctx.app.world_mut(), entity)
+            .query_mut(ctx.app.world_mut())
+            .get_inner(entity)
             .expect("be alive");
         assert_ne!(settings.default_button_settings, button_settings);
         settings.default_button_settings = button_settings.clone();
@@ -2332,7 +2345,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2342,7 +2356,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&GamepadSettings>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .expect("be alive");
         assert_eq!(settings.default_button_settings, button_settings);
     }
@@ -2354,7 +2369,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2365,7 +2381,8 @@ mod tests {
             ctx.app
                 .world_mut()
                 .query::<&Gamepad>()
-                .iter(ctx.app.world())
+                .query(ctx.app.world())
+                .into_iter()
                 .len(),
             0
         );
@@ -2373,7 +2390,8 @@ mod tests {
             .app
             .world_mut()
             .query::<(Entity, &GamepadSettings)>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .is_ok());
     }
 
@@ -2688,7 +2706,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .pressed(GamepadButton::DPadDown));
 
@@ -2709,7 +2728,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .pressed(GamepadButton::DPadDown));
     }
@@ -2734,7 +2754,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .just_pressed(GamepadButton::DPadDown));
         ctx.update();
@@ -2744,7 +2765,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .just_pressed(GamepadButton::DPadDown));
     }
@@ -2793,7 +2815,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .pressed(GamepadButton::DPadDown));
         ctx.app
@@ -2838,7 +2861,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .just_released(GamepadButton::DPadDown));
         ctx.update();
@@ -2848,7 +2872,8 @@ mod tests {
             .app
             .world_mut()
             .query::<&Gamepad>()
-            .get(ctx.app.world(), entity)
+            .query(ctx.app.world())
+            .get_inner(entity)
             .unwrap()
             .just_released(GamepadButton::DPadDown));
     }

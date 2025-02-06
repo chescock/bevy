@@ -393,7 +393,8 @@ mod tests {
 
         let ents = world
             .query::<(Entity, &A, &TableStored)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, &i, &s)| (e, i, s))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -414,7 +415,8 @@ mod tests {
         let mut results = Vec::new();
         world
             .query::<(Entity, &A, &TableStored)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .for_each(|(e, &i, &s)| results.push((e, i, s)));
         assert_eq!(
             results,
@@ -432,7 +434,8 @@ mod tests {
         let f = world.spawn((TableStored("def"), A(456), B(1))).id();
         let ents = world
             .query::<(Entity, &A)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, &i)| (e, i))
             .collect::<HashSet<_>>();
         assert!(ents.contains(&(e, A(123))));
@@ -445,11 +448,19 @@ mod tests {
         let e = world.spawn((TableStored("abc"), A(123))).id();
         let mut query = world.query::<(Entity, &A)>();
 
-        let ents = query.iter(&world).map(|(e, &i)| (e, i)).collect::<Vec<_>>();
+        let ents = query
+            .query(&world)
+            .into_iter()
+            .map(|(e, &i)| (e, i))
+            .collect::<Vec<_>>();
         assert_eq!(ents, &[(e, A(123))]);
 
         let f = world.spawn((TableStored("def"), A(456), B(1))).id();
-        let ents = query.iter(&world).map(|(e, &i)| (e, i)).collect::<Vec<_>>();
+        let ents = query
+            .query(&world)
+            .into_iter()
+            .map(|(e, &i)| (e, i))
+            .collect::<Vec<_>>();
         assert_eq!(ents, &[(e, A(123)), (f, A(456))]);
     }
 
@@ -461,7 +472,8 @@ mod tests {
         let mut results = <HashSet<_>>::default();
         world
             .query::<(Entity, &A)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .for_each(|(e, &i)| {
                 results.insert((e, i));
             });
@@ -481,7 +493,8 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
         world
             .query::<(Entity, &A)>()
-            .par_iter(&world)
+            .query(&world)
+            .par_iter_inner()
             .for_each(|(e, &A(i))| {
                 results.lock().unwrap().push((e, i));
             });
@@ -504,7 +517,8 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
         world
             .query::<(Entity, &SparseStored)>()
-            .par_iter(&world)
+            .query(&world)
+            .par_iter_inner()
             .for_each(|(e, &SparseStored(i))| results.lock().unwrap().push((e, i)));
         results.lock().unwrap().sort();
         assert_eq!(
@@ -518,7 +532,12 @@ mod tests {
         let mut world = World::new();
         world.spawn((TableStored("abc"), A(123)));
         world.spawn((TableStored("def"), A(456)));
-        assert!(world.query::<(&B, &A)>().iter(&world).next().is_none());
+        assert!(world
+            .query::<(&B, &A)>()
+            .query(&world)
+            .into_iter()
+            .next()
+            .is_none());
     }
 
     #[test]
@@ -528,7 +547,8 @@ mod tests {
         let f = world.spawn((TableStored("def"), A(456), B(1))).id();
         let ents = world
             .query::<(Entity, &B)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, &b)| (e, b))
             .collect::<Vec<_>>();
         assert_eq!(ents, &[(f, B(1))]);
@@ -541,7 +561,8 @@ mod tests {
         world.spawn(A(456));
         let result = world
             .query_filtered::<&A, With<B>>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(result, vec![A(123)]);
@@ -556,7 +577,8 @@ mod tests {
         let mut results = Vec::new();
         world
             .query_filtered::<&A, With<B>>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .for_each(|i| results.push(*i));
         assert_eq!(results, vec![A(123)]);
     }
@@ -569,7 +591,8 @@ mod tests {
         world.spawn(A(456));
         let result = world
             .query_filtered::<&A, With<SparseStored>>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(result, vec![A(123)]);
@@ -584,7 +607,8 @@ mod tests {
         let mut results = Vec::new();
         world
             .query_filtered::<&A, With<SparseStored>>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .for_each(|i| results.push(*i));
         assert_eq!(results, vec![A(123)]);
     }
@@ -596,7 +620,8 @@ mod tests {
         world.spawn(A(456));
         let result = world
             .query_filtered::<&A, Without<B>>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(result, vec![A(456)]);
@@ -611,7 +636,8 @@ mod tests {
         world.spawn(TableStored("abc"));
         let ents = world
             .query::<(Entity, Option<&B>, &A)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, b, &i)| (e, b.copied(), i))
             .collect::<HashSet<_>>();
         assert!(ents.contains(&(e, None, A(123))));
@@ -630,7 +656,8 @@ mod tests {
         // world.spawn(SparseStored(1));
         let ents = world
             .query::<(Entity, Option<&SparseStored>, &A)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, b, &i)| (e, b.copied(), i))
             .collect::<HashSet<_>>();
         assert_eq!(
@@ -651,7 +678,8 @@ mod tests {
         world.spawn(TableStored("abc"));
         let ents = world
             .query::<(Entity, Option<&SparseStored>, &A)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, b, &i)| (e, b.copied(), i))
             .collect::<Vec<_>>();
         assert_eq!(ents, &[(e, None, A(123)), (f, None, A(456))]);
@@ -666,7 +694,8 @@ mod tests {
         assert_eq!(
             world
                 .query::<(Entity, &A, &B)>()
-                .iter(&world)
+                .query(&world)
+                .into_iter()
                 .map(|(e, &i, &b)| (e, i, b))
                 .collect::<HashSet<_>>(),
             [(e1, A(1), B(3)), (e2, A(2), B(4))]
@@ -677,7 +706,8 @@ mod tests {
         assert_eq!(
             world
                 .query::<(Entity, &A, &B)>()
-                .iter(&world)
+                .query(&world)
+                .into_iter()
                 .map(|(e, &i, &b)| (e, i, b))
                 .collect::<Vec<_>>(),
             &[(e2, A(2), B(4))]
@@ -685,7 +715,8 @@ mod tests {
         assert_eq!(
             world
                 .query::<(Entity, &B, &TableStored)>()
-                .iter(&world)
+                .query(&world)
+                .into_iter()
                 .map(|(e, &B(b), &TableStored(s))| (e, b, s))
                 .collect::<HashSet<_>>(),
             [(e2, 4, "xyz"), (e1, 3, "abc")]
@@ -696,7 +727,8 @@ mod tests {
         assert_eq!(
             world
                 .query::<(Entity, &A, &B)>()
-                .iter(&world)
+                .query(&world)
+                .into_iter()
                 .map(|(e, &i, &b)| (e, i, b))
                 .collect::<HashSet<_>>(),
             [(e2, A(2), B(4)), (e1, A(43), B(3))]
@@ -707,7 +739,8 @@ mod tests {
         assert_eq!(
             world
                 .query::<(Entity, &C)>()
-                .iter(&world)
+                .query(&world)
+                .into_iter()
                 .map(|(e, &f)| (e, f))
                 .collect::<Vec<_>>(),
             &[(e1, C)]
@@ -775,7 +808,8 @@ mod tests {
         world.spawn_batch((0..100).map(|x| (A(x), TableStored("abc"))));
         let values = world
             .query::<&A>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|v| v.0)
             .collect::<Vec<_>>();
         let expected = (0..100).collect::<Vec<_>>();
@@ -790,14 +824,17 @@ mod tests {
         let c = world.spawn((TableStored("ghi"), A(789), B(1))).id();
 
         let mut i32_query = world.query::<&A>();
-        assert_eq!(i32_query.get(&world, a).unwrap().0, 123);
-        assert_eq!(i32_query.get(&world, b).unwrap().0, 456);
+        assert_eq!(i32_query.query(&world).get_inner(a).unwrap().0, 123);
+        assert_eq!(i32_query.query(&world).get_inner(b).unwrap().0, 456);
 
         let mut i32_bool_query = world.query::<(&A, &B)>();
-        assert!(i32_bool_query.get(&world, a).is_err());
-        assert_eq!(i32_bool_query.get(&world, c).unwrap(), (&A(789), &B(1)));
+        assert!(i32_bool_query.query(&world).get_inner(a).is_err());
+        assert_eq!(
+            i32_bool_query.query(&world).get_inner(c).unwrap(),
+            (&A(789), &B(1))
+        );
         assert!(world.despawn(a));
-        assert!(i32_query.get(&world, a).is_err());
+        assert!(i32_query.query(&world).get_inner(a).is_err());
     }
 
     #[test]
@@ -811,16 +848,34 @@ mod tests {
             .id();
 
         let mut query = world.query::<&TableStored>();
-        assert_eq!(query.get(&world, a).unwrap(), &TableStored("abc"));
-        assert_eq!(query.get(&world, b).unwrap(), &TableStored("def"));
-        assert_eq!(query.get(&world, c).unwrap(), &TableStored("ghi"));
+        assert_eq!(
+            query.query(&world).get_inner(a).unwrap(),
+            &TableStored("abc")
+        );
+        assert_eq!(
+            query.query(&world).get_inner(b).unwrap(),
+            &TableStored("def")
+        );
+        assert_eq!(
+            query.query(&world).get_inner(c).unwrap(),
+            &TableStored("ghi")
+        );
 
         world.entity_mut(b).remove::<SparseStored>();
         world.entity_mut(c).remove::<SparseStored>();
 
-        assert_eq!(query.get(&world, a).unwrap(), &TableStored("abc"));
-        assert_eq!(query.get(&world, b).unwrap(), &TableStored("def"));
-        assert_eq!(query.get(&world, c).unwrap(), &TableStored("ghi"));
+        assert_eq!(
+            query.query(&world).get_inner(a).unwrap(),
+            &TableStored("abc")
+        );
+        assert_eq!(
+            query.query(&world).get_inner(b).unwrap(),
+            &TableStored("def")
+        );
+        assert_eq!(
+            query.query(&world).get_inner(c).unwrap(),
+            &TableStored("ghi")
+        );
     }
 
     #[test]
@@ -899,48 +954,68 @@ mod tests {
         let mut world = World::new();
         let a = world.spawn(A(123)).id();
 
-        assert_eq!(world.query::<&A>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&A>().query(&world).into_iter().count(), 1);
         assert_eq!(
-            world.query_filtered::<(), Added<A>>().iter(&world).count(),
+            world
+                .query_filtered::<(), Added<A>>()
+                .query(&world)
+                .into_iter()
+                .count(),
             1
         );
-        assert_eq!(world.query::<&A>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&A>().query(&world).into_iter().count(), 1);
         assert_eq!(
-            world.query_filtered::<(), Added<A>>().iter(&world).count(),
+            world
+                .query_filtered::<(), Added<A>>()
+                .query(&world)
+                .into_iter()
+                .count(),
             1
         );
-        assert!(world.query::<&A>().get(&world, a).is_ok());
+        assert!(world.query::<&A>().query(&world).get_inner(a).is_ok());
         assert!(world
             .query_filtered::<(), Added<A>>()
-            .get(&world, a)
+            .query(&world)
+            .get_inner(a)
             .is_ok());
-        assert!(world.query::<&A>().get(&world, a).is_ok());
+        assert!(world.query::<&A>().query(&world).get_inner(a).is_ok());
         assert!(world
             .query_filtered::<(), Added<A>>()
-            .get(&world, a)
+            .query(&world)
+            .get_inner(a)
             .is_ok());
 
         world.clear_trackers();
 
-        assert_eq!(world.query::<&A>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&A>().query(&world).into_iter().count(), 1);
         assert_eq!(
-            world.query_filtered::<(), Added<A>>().iter(&world).count(),
+            world
+                .query_filtered::<(), Added<A>>()
+                .query(&world)
+                .into_iter()
+                .count(),
             0
         );
-        assert_eq!(world.query::<&A>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&A>().query(&world).into_iter().count(), 1);
         assert_eq!(
-            world.query_filtered::<(), Added<A>>().iter(&world).count(),
+            world
+                .query_filtered::<(), Added<A>>()
+                .query(&world)
+                .into_iter()
+                .count(),
             0
         );
-        assert!(world.query::<&A>().get(&world, a).is_ok());
+        assert!(world.query::<&A>().query(&world).get_inner(a).is_ok());
         assert!(world
             .query_filtered::<(), Added<A>>()
-            .get(&world, a)
+            .query(&world)
+            .get_inner(a)
             .is_err());
-        assert!(world.query::<&A>().get(&world, a).is_ok());
+        assert!(world.query::<&A>().query(&world).get_inner(a).is_ok());
         assert!(world
             .query_filtered::<(), Added<A>>()
-            .get(&world, a)
+            .query(&world)
+            .get_inner(a)
             .is_err());
     }
 
@@ -952,7 +1027,8 @@ mod tests {
         fn get_added<Com: Component>(world: &mut World) -> Vec<Entity> {
             world
                 .query_filtered::<Entity, Added<Com>>()
-                .iter(world)
+                .query(&world)
+                .into_iter()
                 .collect::<Vec<Entity>>()
         }
 
@@ -969,7 +1045,8 @@ mod tests {
 
         let added = world
             .query_filtered::<Entity, (Added<A>, Added<B>)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .collect::<Vec<Entity>>();
         assert_eq!(added, vec![e2]);
     }
@@ -984,7 +1061,12 @@ mod tests {
 
         world.clear_trackers();
 
-        for (i, mut a) in world.query::<&mut A>().iter_mut(&mut world).enumerate() {
+        for (i, mut a) in world
+            .query::<&mut A>()
+            .query_mut(&mut world)
+            .into_iter()
+            .enumerate()
+        {
             if i % 2 == 0 {
                 a.0 += 1;
             }
@@ -993,7 +1075,8 @@ mod tests {
         fn get_filtered<F: QueryFilter>(world: &mut World) -> HashSet<Entity> {
             world
                 .query_filtered::<Entity, F>()
-                .iter(world)
+                .query(&world)
+                .into_iter()
                 .collect::<HashSet<Entity>>()
         }
 
@@ -1091,7 +1174,8 @@ mod tests {
 
         for (i, mut a) in world
             .query::<&mut SparseStored>()
-            .iter_mut(&mut world)
+            .query_mut(&mut world)
+            .into_iter()
             .enumerate()
         {
             if i % 2 == 0 {
@@ -1102,7 +1186,8 @@ mod tests {
         fn get_filtered<F: QueryFilter>(world: &mut World) -> HashSet<Entity> {
             world
                 .query_filtered::<Entity, F>()
-                .iter(world)
+                .query(&world)
+                .into_iter()
                 .collect::<HashSet<Entity>>()
         }
 
@@ -1202,7 +1287,8 @@ mod tests {
         fn get_changed(world: &mut World) -> Vec<Entity> {
             world
                 .query_filtered::<Entity, Changed<A>>()
-                .iter(world)
+                .query(&world)
+                .into_iter()
                 .collect::<Vec<Entity>>()
         }
         assert_eq!(get_changed(&mut world), vec![e1]);
@@ -1352,7 +1438,8 @@ mod tests {
 
         let mut query = world.query::<(&B, &TableStored)>();
         let results = query
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<HashSet<_>>();
         assert_eq!(
@@ -1366,7 +1453,8 @@ mod tests {
         assert_eq!(removed_bundle, (B(2), TableStored("2")));
 
         let results = query
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<HashSet<_>>();
         assert_eq!(
@@ -1375,7 +1463,11 @@ mod tests {
         );
 
         let mut a_query = world.query::<&A>();
-        let results = a_query.iter(&world).map(|a| a.0).collect::<HashSet<_>>();
+        let results = a_query
+            .query(&world)
+            .into_iter()
+            .map(|a| a.0)
+            .collect::<HashSet<_>>();
         assert_eq!(results, [1, 3, 2].into_iter().collect::<HashSet<_>>());
 
         let entity_ref = world.entity(e2);
@@ -1435,7 +1527,7 @@ mod tests {
         world.spawn(C);
 
         let mut query = world.query::<(&A, &B)>();
-        assert_eq!(query.iter(&world).len(), 3);
+        assert_eq!(query.query(&world).into_iter().len(), 3);
     }
 
     #[test]
@@ -1506,8 +1598,8 @@ mod tests {
         let mut world_a = World::new();
         let world_b = World::new();
         let mut query = world_a.query::<&A>();
-        query.iter(&world_a);
-        query.iter(&world_b);
+        query.query(&world_a).into_iter();
+        query.query(&world_b).into_iter();
     }
 
     #[test]
@@ -1540,8 +1632,8 @@ mod tests {
         let mut world_a = World::new();
         let world_b = World::new();
         let mut query = world_a.query::<&A>();
-        let _ = query.get(&world_a, Entity::from_raw(0));
-        let _ = query.get(&world_b, Entity::from_raw(0));
+        let _ = query.query(&world_a).get_inner(Entity::from_raw(0));
+        let _ = query.query(&world_b).get_inner(Entity::from_raw(0));
     }
 
     #[test]
@@ -1550,8 +1642,8 @@ mod tests {
         let mut world_a = World::new();
         let world_b = World::new();
         let mut query = world_a.query::<&A>();
-        query.iter(&world_a).for_each(|_| {});
-        query.iter(&world_b).for_each(|_| {});
+        query.query(&world_a).into_iter().for_each(|_| {});
+        query.query(&world_b).into_iter().for_each(|_| {});
     }
 
     #[test]
@@ -1632,19 +1724,19 @@ mod tests {
         let mut q1 = world.query::<&A>();
         let mut q2 = world.query::<&SparseStored>();
 
-        assert_eq!(q1.iter(&world).len(), 1);
-        assert_eq!(q2.iter(&world).len(), 1);
+        assert_eq!(q1.query(&world).into_iter().len(), 1);
+        assert_eq!(q2.query(&world).into_iter().len(), 1);
         assert_eq!(world.entities().len(), 2);
 
         world.clear_entities();
 
         assert_eq!(
-            q1.iter(&world).len(),
+            q1.query(&world).into_iter().len(),
             0,
             "world should not contain table components"
         );
         assert_eq!(
-            q2.iter(&world).len(),
+            q2.query(&world).into_iter().len(),
             0,
             "world should not contain sparse set components"
         );
@@ -1667,7 +1759,8 @@ mod tests {
             ($query:ty, $filter:ty) => {
                 world
                     .query_filtered::<$query, $filter>()
-                    .iter(&world)
+                    .query(&world)
+                    .into_iter()
                     .size_hint()
                     .0
             };
@@ -1820,7 +1913,7 @@ mod tests {
 
         world.insert_batch(values);
         let mut query = world.query::<(Option<&A>, &B, &C)>();
-        let component_values = query.get_many(&world, [e0, e1, e2]).unwrap();
+        let component_values = query.query(&world).get_many_inner([e0, e1, e2]).unwrap();
 
         assert_eq!(
             component_values,

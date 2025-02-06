@@ -70,7 +70,10 @@ impl Node for MeshletVisibilityBufferRasterPassNode {
             meshlet_view_bind_groups,
             meshlet_view_resources,
             lights,
-        )) = self.main_view_query.get_manual(world, graph.view_entity())
+        )) = self
+            .main_view_query
+            .query_manual(world)
+            .get_inner(graph.view_entity())
         else {
             return Ok(());
         };
@@ -226,7 +229,10 @@ impl Node for MeshletVisibilityBufferRasterPassNode {
                 previous_view_offset,
                 meshlet_view_bind_groups,
                 meshlet_view_resources,
-            )) = self.view_light_query.get_manual(world, *light_entity)
+            )) = self
+                .view_light_query
+                .query_manual(world)
+                .get_inner(*light_entity)
             else {
                 continue;
             };

@@ -25,13 +25,13 @@
 //! world.spawn((A,));
 //!
 //! let mut normal_query = world.query::<&A>();
-//! assert_eq!(2, normal_query.iter(&world).count());
+//! assert_eq!(2, normal_query.query(&world).into_iter().count());
 //!
 //! let mut prefab_query = world.query_filtered::<&A, With<Prefab>>();
-//! assert_eq!(1, prefab_query.iter(&world).count());
+//! assert_eq!(1, prefab_query.query(&world).into_iter().count());
 //!
 //! let mut maybe_prefab_query = world.query::<(&A, Has<Prefab>)>();
-//! assert_eq!(3, maybe_prefab_query.iter(&world).count());
+//! assert_eq!(3, maybe_prefab_query.query(&world).into_iter().count());
 //! ```
 //!
 //! ## Default query filters
@@ -281,24 +281,24 @@ mod tests {
         world.spawn((Disabled, CustomDisabled));
 
         let mut query = world.query::<()>();
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         let mut query = world.query_filtered::<(), With<Disabled>>();
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         let mut query = world.query::<Has<Disabled>>();
-        assert_eq!(2, query.iter(&world).count());
+        assert_eq!(2, query.query(&world).into_iter().count());
 
         let mut query = world.query_filtered::<(), With<CustomDisabled>>();
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         let mut query = world.query::<Has<CustomDisabled>>();
-        assert_eq!(2, query.iter(&world).count());
+        assert_eq!(2, query.query(&world).into_iter().count());
 
         let mut query = world.query_filtered::<(), (With<Disabled>, With<CustomDisabled>)>();
-        assert_eq!(1, query.iter(&world).count());
+        assert_eq!(1, query.query(&world).into_iter().count());
 
         let mut query = world.query::<(Has<Disabled>, Has<CustomDisabled>)>();
-        assert_eq!(4, query.iter(&world).count());
+        assert_eq!(4, query.query(&world).into_iter().count());
     }
 }

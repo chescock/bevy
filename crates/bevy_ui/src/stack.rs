@@ -233,7 +233,7 @@ mod tests {
         let actual_result = ui_stack
             .uinodes
             .iter()
-            .map(|entity| query.get(&world, *entity).unwrap().clone())
+            .map(|entity| query.query(&world).get_inner(*entity).unwrap().clone())
             .collect::<Vec<_>>();
         let expected_result = vec![
             (Label("1-2-1")), // GlobalZIndex(-3)
@@ -289,7 +289,7 @@ mod tests {
         let actual_result = ui_stack
             .uinodes
             .iter()
-            .map(|entity| query.get(&world, *entity).unwrap().clone())
+            .map(|entity| query.query(&world).get_inner(*entity).unwrap().clone())
             .collect::<Vec<_>>();
 
         let expected_result = vec![

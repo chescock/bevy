@@ -722,9 +722,30 @@ mod tests {
         let my_resource = my_resource.unwrap();
         assert_eq!(my_resource.foo, 123);
 
-        assert_eq!(3, dst_world.query::<&Foo>().iter(&dst_world).count());
-        assert_eq!(2, dst_world.query::<&Bar>().iter(&dst_world).count());
-        assert_eq!(1, dst_world.query::<&Baz>().iter(&dst_world).count());
+        assert_eq!(
+            3,
+            dst_world
+                .query::<&Foo>()
+                .query(&dst_world)
+                .into_iter()
+                .count()
+        );
+        assert_eq!(
+            2,
+            dst_world
+                .query::<&Bar>()
+                .query(&dst_world)
+                .into_iter()
+                .count()
+        );
+        assert_eq!(
+            1,
+            dst_world
+                .query::<&Baz>()
+                .query(&dst_world)
+                .into_iter()
+                .count()
+        );
     }
 
     fn roundtrip_ron(world: &World) -> (DynamicScene, DynamicScene) {
@@ -763,18 +784,21 @@ mod tests {
 
         let bar_to_foo = dst_world
             .query_filtered::<&MyEntityRef, Without<Foo>>()
-            .single(&dst_world)
+            .query(&dst_world)
+            .single_inner()
             .cloned()
             .unwrap();
         let foo = dst_world
             .query_filtered::<Entity, With<Foo>>()
-            .single(&dst_world)
+            .query(&dst_world)
+            .single_inner()
             .unwrap();
 
         assert_eq!(foo, bar_to_foo.0);
         assert!(dst_world
             .query_filtered::<&MyEntityRef, With<Foo>>()
-            .iter(&dst_world)
+            .query(&dst_world)
+            .into_iter()
             .all(|r| world.get_entity(r.0).is_err()));
     }
 
@@ -793,7 +817,10 @@ mod tests {
         deserialized_scene
             .write_to_world(&mut world, &mut EntityHashMap::default())
             .unwrap();
-        assert_eq!(&qux, world.query::<&Qux>().single(&world).unwrap());
+        assert_eq!(
+            &qux,
+            world.query::<&Qux>().query(&world).single_inner().unwrap()
+        );
     }
 
     #[test]

@@ -1394,7 +1394,7 @@ impl World {
     /// ]).collect::<Vec<Entity>>();
     ///
     /// let mut query = world.query::<(&mut Position, &Velocity)>();
-    /// for (mut position, velocity) in query.iter_mut(&mut world) {
+    /// for (mut position, velocity) in query.query_mut(&mut world) {
     ///    position.x += velocity.x;
     ///    position.y += velocity.y;
     /// }
@@ -1421,7 +1421,8 @@ impl World {
     /// let b = world.spawn((Order(3), Label("third"))).id();
     /// let c = world.spawn((Order(1), Label("first"))).id();
     /// let mut entities = world.query::<(Entity, &Order, &Label)>()
-    ///     .iter(&world)
+    ///     .query(&world)
+    ///     .into_iter()
     ///     .collect::<Vec<_>>();
     /// // Sort the query results by their `Order` component before comparing
     /// // to expected results. Query iteration order should not be relied on.
@@ -1452,7 +1453,7 @@ impl World {
     /// let e2 = world.spawn((A, B)).id();
     ///
     /// let mut query = world.query_filtered::<Entity, With<B>>();
-    /// let matching_entities = query.iter(&world).collect::<Vec<Entity>>();
+    /// let matching_entities = query.query(&world).into_iter().collect::<Vec<Entity>>();
     ///
     /// assert_eq!(matching_entities, vec![e2]);
     /// ```
@@ -1480,7 +1481,7 @@ impl World {
     ///
     /// fn get_positions(world: &World) -> Vec<(Entity, &Position)> {
     ///     let mut query = world.try_query::<(Entity, &Position)>().unwrap();
-    ///     query.iter(world).collect()
+    ///     query.query(world).into_iter().collect()
     /// }
     ///
     /// let positions = get_positions(&world);
@@ -1527,7 +1528,7 @@ impl World {
     /// let e2 = world.spawn((A, B)).id();
     ///
     /// let mut query = world.try_query_filtered::<Entity, With<B>>().unwrap();
-    /// let matching_entities = query.iter(&world).collect::<Vec<Entity>>();
+    /// let matching_entities = query.query(&world).into_iter().collect::<Vec<Entity>>();
     ///
     /// assert_eq!(matching_entities, vec![e2]);
     /// ```
@@ -4289,10 +4290,10 @@ mod tests {
         let mut world = World::new();
         world.spawn(Foo);
         world.spawn((Foo, Disabled));
-        assert_eq!(1, world.query::<&Foo>().iter(&world).count());
+        assert_eq!(1, world.query::<&Foo>().query(&world).into_iter().count());
 
         // If we explicitly remove the resource, no entities should be filtered anymore
         world.remove_resource::<DefaultQueryFilters>();
-        assert_eq!(2, world.query::<&Foo>().iter(&world).count());
+        assert_eq!(2, world.query::<&Foo>().query(&world).into_iter().count());
     }
 }

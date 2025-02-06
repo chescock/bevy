@@ -38,7 +38,8 @@ impl<'w> Benchmark<'w> {
     #[inline(never)]
     pub fn run(&mut self) {
         self.1
-            .iter_mut(&mut self.0)
+            .query_mut(&mut self.0)
+            .into_iter()
             .for_each(|(velocity, mut position)| {
                 position.0 += velocity.0;
             });

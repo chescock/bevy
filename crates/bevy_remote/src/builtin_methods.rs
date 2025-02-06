@@ -763,7 +763,7 @@ pub fn process_remote_query_request(In(params): In<Option<Value>>, world: &mut W
 
     let mut response = BrpQueryResponse::default();
     let mut query = query.build();
-    for row in query.iter(world) {
+    for row in query.query(world) {
         // The map of component values:
         let components_map = build_components_map(
             row.clone(),

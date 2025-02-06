@@ -39,7 +39,8 @@ impl<'w> Benchmark<'w> {
     #[inline(never)]
     pub fn run(&mut self) {
         self.1
-            .par_iter_mut(&mut self.0)
+            .query_mut(&mut self.0)
+            .par_iter_inner()
             .for_each(|(mut v1, v2)| v1.0 += v2.0);
     }
 }

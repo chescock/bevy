@@ -682,7 +682,8 @@ mod tests {
 
         let overlap_check = world
             .query_filtered::<(Entity, &ComputedNode, &GlobalTransform), Without<ChildOf>>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .fold(
                 Option::<(Rect, bool)>::None,
                 |option_rect, (entity, node, global_transform)| {
@@ -783,7 +784,8 @@ mod tests {
             ui_schedule.run(world);
             let (ui_node_entity, UiTargetCamera(target_camera_entity)) = world
                 .query_filtered::<(Entity, &UiTargetCamera), With<MovingUiNode>>()
-                .single(world)
+                .query(world)
+                .single_inner()
                 .expect("missing MovingUiNode");
             assert_eq!(expected_camera_entity, target_camera_entity);
             let mut ui_surface = world.resource_mut::<UiSurface>();
@@ -824,7 +826,7 @@ mod tests {
         ui_schedule.run(&mut world);
 
         let pos_inc = Vec2::splat(1.);
-        let total_cameras = world.query::<&Camera>().iter(&world).len();
+        let total_cameras = world.query::<&Camera>().query(&world).into_iter().len();
         // add total cameras - 1 (the assumed default) to get an idea for how many nodes we should expect
         let expected_max_taffy_node_count = get_taffy_node_count(&world) + total_cameras - 1;
 
@@ -834,7 +836,8 @@ mod tests {
 
         let viewport_rects = world
             .query::<(Entity, &Camera)>()
-            .iter(&world)
+            .query(&world)
+            .into_iter()
             .map(|(e, c)| (e, c.logical_viewport_rect().expect("missing viewport")))
             .collect::<Vec<_>>();
 
