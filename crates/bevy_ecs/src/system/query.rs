@@ -2102,33 +2102,6 @@ impl<'w, Q: QueryData, F: QueryFilter> QueryLens<'w, Q, F> {
         // uphold the safety invariants of `Query::new`
         unsafe { Query::new(self.world, &self.state, self.last_run, self.this_run) }
     }
-
-    /// Creates a new [`QueryLens`].
-    ///
-    /// # Panics
-    ///
-    /// This will panic if the world used to create `state` is not `world`.
-    ///
-    /// # Safety
-    ///
-    /// `QueryLens` can be used to construct a `Query` by internally calling `Query::new`.
-    /// All safety invariants of `Query::new` must be upheld when calling `QueryLens::new`.
-    #[inline]
-    pub(crate) unsafe fn new(
-        world: UnsafeWorldCell<'w>,
-        state: QueryState<Q, F>,
-        last_run: Tick,
-        this_run: Tick,
-    ) -> Self {
-        state.validate_world(world.id());
-
-        Self {
-            world,
-            state,
-            last_run,
-            this_run,
-        }
-    }
 }
 
 impl<'w, 's, Q: QueryData, F: QueryFilter> From<&'s mut QueryLens<'w, Q, F>>

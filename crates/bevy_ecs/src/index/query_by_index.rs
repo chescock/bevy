@@ -4,10 +4,11 @@ use crate::{
     archetype::Archetype,
     component::{ComponentId, Immutable, Tick},
     prelude::Component,
-    query::{QueryBuilder, QueryData, QueryFilter, QueryState, With},
-    system::{Query, QueryLens, Res, SystemMeta, SystemParam},
+    query::{QueryData, QueryFilter, QueryState, With},
+    system::{init_query_param, Query, Res, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
+use bevy_platform_support::sync::Arc;
 
 use super::Index;
 
@@ -32,19 +33,17 @@ use super::Index;
 /// #
 /// # world.flush();
 ///
-/// fn find_all_player_one_entities(by_player: QueryByIndex<Player, Entity>) {
-///     let mut lens = by_player.at(&Player(0));
-///     
-///     for entity in lens.query().iter() {
+/// fn find_all_player_one_entities(mut by_player: QueryByIndex<Player, Entity>) {
+///     for entity in by_player.at(&Player(0)).iter() {
 ///         println!("{entity:?} belongs to Player 1!");
 ///     }
 /// #   assert_eq!((
-/// #       by_player.at(&Player(0)).query().iter().count(),
-/// #       by_player.at(&Player(1)).query().iter().count(),
-/// #       by_player.at(&Player(2)).query().iter().count(),
-/// #       by_player.at(&Player(3)).query().iter().count(),
-/// #       by_player.at(&Player(4)).query().iter().count(),
-/// #       by_player.at(&Player(5)).query().iter().count(),
+/// #       by_player.at(&Player(0)).iter().count(),
+/// #       by_player.at(&Player(1)).iter().count(),
+/// #       by_player.at(&Player(2)).iter().count(),
+/// #       by_player.at(&Player(3)).iter().count(),
+/// #       by_player.at(&Player(4)).iter().count(),
+/// #       by_player.at(&Player(5)).iter().count(),
 /// #    ), (1, 2, 3, 4, 5, 6));
 /// }
 /// # world.run_system_cached(find_all_player_one_entities);
@@ -57,16 +56,17 @@ pub struct QueryByIndex<
     F: QueryFilter + 'static = (),
 > {
     world: UnsafeWorldCell<'world>,
-    state: &'state QueryByIndexState<C, D, F>,
+    empty_query_state: &'state QueryState<D, (F, With<C>)>,
+    query_states: &'state [QueryState<D, (F, With<C>)>],
     last_run: Tick,
     this_run: Tick,
     index: Res<'world, Index<C>>,
 }
 
-impl<C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
-    QueryByIndex<'_, '_, C, D, F>
+impl<'s, C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
+    QueryByIndex<'_, 's, C, D, F>
 {
-    /// Return a [`QueryLens`] returning entities with a component `C` of the provided value.
+    /// Return a [`Query`] only returning entities with a component `C` of the provided value.
     ///
     /// # Examples
     ///
@@ -83,85 +83,71 @@ impl<C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
     ///
     /// world.add_index(IndexOptions::<FavoriteColor>::default());
     ///
-    /// fn find_red_fans(mut by_color: QueryByIndex<FavoriteColor, Entity>) {
-    ///     let mut lens = by_color.at(&FavoriteColor::Red);
-    ///
-    ///     for entity in lens.query().iter() {
+    /// fn find_red_fans(mut query: QueryByIndex<FavoriteColor, Entity>) {
+    ///     for entity in query.at_mut(&FavoriteColor::Red).iter_mut() {
     ///         println!("{entity:?} likes the color Red!");
     ///     }
     /// }
     /// ```
-    pub fn at_mut(&mut self, value: &C) -> QueryLens<'_, D, (F, With<C>)>
-    where
-        QueryState<D, (F, With<C>)>: Clone,
-    {
-        let state = self.state.primary_query_state.clone();
-
+    pub fn at_mut(&mut self, value: &C) -> Query<'_, 's, D, (F, With<C>)> {
         // SAFETY: We have registered all of the query's world accesses,
         // so the caller ensures that `world` has permission to access any
         // world data that the query needs.
         unsafe {
-            QueryLens::new(
+            Query::new(
                 self.world,
-                self.filter_for_value(value, state),
+                self.state_for_value(value),
                 self.last_run,
                 self.this_run,
             )
         }
     }
 
-    /// Return a read-only [`QueryLens`] returning entities with a component `C` of the provided value.
-    pub fn at(&self, value: &C) -> QueryLens<'_, D::ReadOnly, (F, With<C>)>
-    where
-        QueryState<D::ReadOnly, (F, With<C>)>: Clone,
-    {
-        let state = self.state.primary_query_state.as_readonly().clone();
-
+    /// Return a read-only [`Query`] only returning entities with a component `C` of the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use bevy_ecs::prelude::*;
+    /// # let mut world = World::new();
+    /// #[derive(Component, PartialEq, Eq, Hash, Clone)]
+    /// #[component(immutable)]
+    /// enum FavoriteColor {
+    ///     Red,
+    ///     Green,
+    ///     Blue,
+    /// }
+    ///
+    /// world.add_index::<FavoriteColor>();
+    ///
+    /// fn find_red_fans(query: QueryByIndex<FavoriteColor, Entity>) {
+    ///     for entity in query.at(&FavoriteColor::Red).iter() {
+    ///         println!("{entity:?} likes the color Red!");
+    ///     }
+    /// }
+    /// ```
+    pub fn at(&self, value: &C) -> Query<'_, 's, D::ReadOnly, (F, With<C>)> {
         // SAFETY: We have registered all of the query's world accesses,
         // so the caller ensures that `world` has permission to access any
         // world data that the query needs.
         unsafe {
-            QueryLens::new(
+            Query::new(
                 self.world,
-                self.filter_for_value(value, state),
+                self.state_for_value(value).as_readonly(),
                 self.last_run,
                 self.this_run,
             )
         }
     }
 
-    fn filter_for_value<T: QueryData, U: QueryFilter>(
-        &self,
-        value: &C,
-        mut state: QueryState<T, U>,
-    ) -> QueryState<T, U> {
-        match self.index.mapping.get(value) {
-            Some(index) => {
-                state = (0..self.index.markers.len())
-                    .map(|i| (i, 1 << i))
-                    .take_while(|&(_, mask)| mask <= self.index.slots.len())
-                    .map(|(i, mask)| {
-                        if index & mask > 0 {
-                            &self.state.with_states[i]
-                        } else {
-                            &self.state.without_states[i]
-                        }
-                    })
-                    .fold(state, |state, filter| {
-                        state.join_filtered(self.world, filter)
-                    });
-            }
-            None => {
-                // Create a no-op filter by joining two conflicting filters together.
-                let filter = &self.state.with_states[0];
-                state = state.join_filtered(self.world, filter);
-
-                let filter = &self.state.without_states[0];
-                state = state.join_filtered(self.world, filter);
-            }
-        }
-
-        state
+    fn state_for_value(&self, value: &C) -> &'s QueryState<D, (F, With<C>)> {
+        let index = self.index.mapping.get(value);
+        // If the value was not found in the mapping, there are no matching entities and we can use the empty state.
+        // If the value was found but was out of range, then we have not seen any archetypes matching it yet,
+        // so we can still use the empty state.
+        index
+            .and_then(|index| self.query_states.get(index))
+            .unwrap_or(self.empty_query_state)
     }
 }
 
@@ -170,27 +156,27 @@ impl<C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter>
 /// change at any time to better suit [`QueryByIndex`]s needs.
 #[doc(hidden)]
 pub struct QueryByIndexState<C: Component<Mutability = Immutable>, D: QueryData, F: QueryFilter> {
-    primary_query_state: QueryState<D, (F, With<C>)>,
+    /// A `QueryState` for the underlying query that never match any archetypes.
+    empty_query_state: QueryState<D, (F, With<C>)>,
+    /// A list of `QueryState`s that each match the archetypes for a single index value.
+    query_states: Vec<QueryState<D, (F, With<C>)>>,
+    /// The `SystemParam::State` for a `Res<Index<C>>` parameter.
     index_state: ComponentId,
-
-    // TODO: Instead of storing 1 QueryState per marker component, it would be nice to instead
-    // track all marker components and then "somehow" create a `With<Marker #N>`/`Without<Marker #N>`
-    // query filter from that.
-    /// A list of [`QueryState`]s which each include a filter condition of `With<Marker #N>`.
-    /// Since the marking component is dynamic, it is missing from the type signature of the state.
-    /// Note that this includes `With<C>` purely for communicative purposes, `With<Marker #N>` is a
-    /// strict subset of `With<C>`.
-    with_states: Vec<QueryState<(), With<C>>>,
-    /// A list of [`QueryState`]s which each include a filter condition of `Without<Marker #N>`.
-    /// Since the marking component is dynamic, it is missing from the type signature of the state.
-    /// Note that this includes `With<C>` to limit the scope of this `QueryState`.
-    without_states: Vec<QueryState<(), With<C>>>, // No, With<C> is not a typo
+    /// A copy of the markers from the `Index<C>`.
+    /// We need these in `new_archetype`, but cannot access the `Index` then.
+    markers: Arc<[ComponentId]>,
 }
 
-impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: QueryFilter + 'static>
-    QueryByIndexState<C, D, F>
+// SAFETY: We rely on the known-safe implementations of `SystemParam` for `Res` and `Query`.
+unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: QueryFilter + 'static>
+    SystemParam for QueryByIndex<'_, '_, C, D, F>
+where
+    QueryState<D, (F, With<C>)>: Clone,
 {
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self {
+    type State = QueryByIndexState<C, D, F>;
+    type Item<'w, 's> = QueryByIndex<'w, 's, C, D, F>;
+
+    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
         let Some(index) = world.get_resource::<Index<C>>() else {
             panic!(
                 "Index not setup prior to usage. Please call `app.add_index(IndexOptions::<{}>::default())` during setup",
@@ -198,75 +184,19 @@ impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: QueryFilte
             );
         };
 
-        let ids = index.markers.clone();
+        let markers = index.markers.clone();
 
-        let primary_query_state =
-            <Query<D, (F, With<C>)> as SystemParam>::init_state(world, system_meta);
+        // Start with an uninitialized `QueryState`.
+        // Any existing archetypes in the world will be populated when the system calls `new_archetype` during initialization.
+        let empty_query_state = QueryState::new_uninitialized(world);
+        init_query_param(world, system_meta, &empty_query_state);
         let index_state = <Res<Index<C>> as SystemParam>::init_state(world, system_meta);
-
-        let with_states = ids
-            .iter()
-            .map(|&id| QueryBuilder::new(world).with_id(id).build())
-            .collect::<Vec<_>>();
-
-        let without_states = ids
-            .iter()
-            .map(|&id| QueryBuilder::new(world).without_id(id).build())
-            .collect::<Vec<_>>();
-
-        Self {
-            primary_query_state,
+        QueryByIndexState {
+            empty_query_state,
+            query_states: Vec::new(),
             index_state,
-            without_states,
-            with_states,
+            markers,
         }
-    }
-
-    unsafe fn new_archetype(&mut self, archetype: &Archetype, system_meta: &mut SystemMeta) {
-        <Query<D, (F, With<C>)> as SystemParam>::new_archetype(
-            &mut self.primary_query_state,
-            archetype,
-            system_meta,
-        );
-
-        for state in self
-            .with_states
-            .iter_mut()
-            .chain(self.without_states.iter_mut())
-        {
-            <Query<(), With<C>> as SystemParam>::new_archetype(state, archetype, system_meta);
-        }
-    }
-
-    #[inline]
-    unsafe fn validate_param(&self, system_meta: &SystemMeta, world: UnsafeWorldCell) -> bool {
-        let mut valid = true;
-
-        valid &= <Query<D, (F, With<C>)> as SystemParam>::validate_param(
-            &self.primary_query_state,
-            system_meta,
-            world,
-        );
-        valid &=
-            <Res<Index<C>> as SystemParam>::validate_param(&self.index_state, system_meta, world);
-
-        for state in self.with_states.iter().chain(self.without_states.iter()) {
-            valid &= <Query<(), With<C>> as SystemParam>::validate_param(state, system_meta, world);
-        }
-
-        valid
-    }
-}
-
-// SAFETY: We rely on the known-safe implementations of `SystemParam` for `Res` and `Query`.
-unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: QueryFilter + 'static>
-    SystemParam for QueryByIndex<'_, '_, C, D, F>
-{
-    type State = QueryByIndexState<C, D, F>;
-    type Item<'w, 's> = QueryByIndex<'w, 's, C, D, F>;
-
-    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
-        Self::State::init_state(world, system_meta)
     }
 
     unsafe fn new_archetype(
@@ -274,7 +204,38 @@ unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: Que
         archetype: &Archetype,
         system_meta: &mut SystemMeta,
     ) {
-        Self::State::new_archetype(state, archetype, system_meta);
+        if state.empty_query_state.archetype_matches(archetype) {
+            // This archetype matches the overall query.
+            // We only want to add it to the one `QueryState` that matches the index value,
+            // so that it will only be returned when querying by that value.
+
+            // We can determine the index for an archetype by looking at which
+            // marker components are present and adding up the relevant bits.
+            let indexed_markers = state.markers.iter().enumerate();
+            let index = indexed_markers
+                .filter(|(_, &id)| archetype.contains(id))
+                .map(|(i, _)| 1 << i)
+                .sum::<usize>();
+
+            // Grow the list of query states if necessary,
+            // cloning the empty state so that they don't match anything yet.
+            if index >= state.query_states.len() {
+                state
+                    .query_states
+                    .resize_with(index + 1, || state.empty_query_state.clone());
+            }
+
+            // SAFETY:
+            // - Caller ensures `archetype` is from the right world.
+            // - We called `archetype_matches` on an identical `QueryState` above.
+            unsafe {
+                state.query_states[index].new_archetype_unchecked(archetype);
+                state.query_states[index].update_archetype_component_access(
+                    archetype,
+                    system_meta.archetype_component_access_mut(),
+                );
+            }
+        }
     }
 
     #[inline]
@@ -283,7 +244,7 @@ unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: Que
         system_meta: &SystemMeta,
         world: UnsafeWorldCell,
     ) -> bool {
-        Self::State::validate_param(state, system_meta, world)
+        <Res<Index<C>> as SystemParam>::validate_param(&state.index_state, system_meta, world)
     }
 
     unsafe fn get_param<'world, 'state>(
@@ -292,8 +253,6 @@ unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: Que
         world: UnsafeWorldCell<'world>,
         change_tick: Tick,
     ) -> Self::Item<'world, 'state> {
-        state.primary_query_state.validate_world(world.id());
-
         let index = <Res<Index<C>> as SystemParam>::get_param(
             &mut state.index_state,
             system_meta,
@@ -303,7 +262,8 @@ unsafe impl<C: Component<Mutability = Immutable>, D: QueryData + 'static, F: Que
 
         QueryByIndex {
             world,
-            state,
+            empty_query_state: &state.empty_query_state,
+            query_states: &state.query_states,
             last_run: system_meta.last_run,
             this_run: change_tick,
             index,
