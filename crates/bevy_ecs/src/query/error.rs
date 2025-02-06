@@ -136,7 +136,8 @@ mod test {
 
         let err = world
             .query::<&NotPresent>()
-            .get(&world, entity)
+            .query(&world)
+            .get_inner(entity)
             .unwrap_err();
 
         assert_eq!(

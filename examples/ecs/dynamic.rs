@@ -154,40 +154,43 @@ fn main() {
                 let mut builder = QueryBuilder::<FilteredEntityMut>::new(&mut world);
                 parse_query(rest, &mut builder, &component_names);
                 let mut query = builder.build();
-                query.iter_mut(&mut world).for_each(|filtered_entity| {
-                    let terms = filtered_entity
-                        .access()
-                        .component_reads_and_writes()
-                        .0
-                        .map(|id| {
-                            let ptr = filtered_entity.get_by_id(id).unwrap();
-                            let info = component_info.get(&id).unwrap();
-                            let len = info.layout().size() / size_of::<u64>();
+                query
+                    .query_mut(&mut world)
+                    .into_iter()
+                    .for_each(|filtered_entity| {
+                        let terms = filtered_entity
+                            .access()
+                            .component_reads_and_writes()
+                            .0
+                            .map(|id| {
+                                let ptr = filtered_entity.get_by_id(id).unwrap();
+                                let info = component_info.get(&id).unwrap();
+                                let len = info.layout().size() / size_of::<u64>();
 
-                            // SAFETY:
-                            // - All components are created with layout [u64]
-                            // - len is calculated from the component descriptor
-                            let data = unsafe {
-                                std::slice::from_raw_parts_mut(
-                                    ptr.assert_unique().as_ptr().cast::<u64>(),
-                                    len,
-                                )
-                            };
+                                // SAFETY:
+                                // - All components are created with layout [u64]
+                                // - len is calculated from the component descriptor
+                                let data = unsafe {
+                                    std::slice::from_raw_parts_mut(
+                                        ptr.assert_unique().as_ptr().cast::<u64>(),
+                                        len,
+                                    )
+                                };
 
-                            // If we have write access, increment each value once
-                            if filtered_entity.access().has_component_write(id) {
-                                data.iter_mut().for_each(|data| {
-                                    *data += 1;
-                                });
-                            }
+                                // If we have write access, increment each value once
+                                if filtered_entity.access().has_component_write(id) {
+                                    data.iter_mut().for_each(|data| {
+                                        *data += 1;
+                                    });
+                                }
 
-                            format!("{}: {:?}", info.name(), data[0..len].to_vec())
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                                format!("{}: {:?}", info.name(), data[0..len].to_vec())
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
 
-                    println!("{}: {}", filtered_entity.id(), terms);
-                });
+                        println!("{}: {}", filtered_entity.id(), terms);
+                    });
             }
             _ => continue,
         }

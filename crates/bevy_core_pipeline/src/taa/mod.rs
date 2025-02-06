@@ -358,7 +358,7 @@ fn extract_taa_settings(mut commands: Commands, mut main_world: ResMut<MainWorld
     )>();
 
     for (entity, camera, camera_projection, mut taa_settings) in
-        cameras_3d.iter_mut(&mut main_world)
+        cameras_3d.query_mut(&mut main_world)
     {
         let has_perspective_projection = matches!(camera_projection, Projection::Perspective(_));
         let mut entity_commands = commands

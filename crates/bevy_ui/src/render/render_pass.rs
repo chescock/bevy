@@ -57,14 +57,18 @@ impl Node for UiPassNode {
         };
 
         // Query the UI view components.
-        let Ok((view, ui_view_target)) = self.ui_view_query.get_manual(world, input_view_entity)
+        let Ok((view, ui_view_target)) = self
+            .ui_view_query
+            .query_manual(world)
+            .get_inner(input_view_entity)
         else {
             return Ok(());
         };
 
         let Ok((target, camera)) = self
             .ui_view_target_query
-            .get_manual(world, ui_view_target.0)
+            .query_manual(world)
+            .get_inner(ui_view_target.0)
         else {
             return Ok(());
         };
@@ -81,7 +85,8 @@ impl Node for UiPassNode {
         // use the UI view entity if it is defined
         let view_entity = if let Ok(ui_camera_view) = self
             .ui_camera_view_query
-            .get_manual(world, input_view_entity)
+            .query_manual(world)
+            .get_inner(input_view_entity)
         {
             ui_camera_view.0
         } else {

@@ -579,7 +579,7 @@ pub struct HookContext {
 ///
 /// // No entities with `MyTrackedComponent` have been added yet, so we can safely add component hooks
 /// let mut tracked_component_query = world.query::<&MyTrackedComponent>();
-/// assert!(tracked_component_query.iter(&world).next().is_none());
+/// assert!(tracked_component_query.query(&world).into_iter().next().is_none());
 ///
 /// world.register_component_hooks::<MyTrackedComponent>().on_add(|mut world, context| {
 ///    let mut tracked_entities = world.resource_mut::<TrackedEntities>();

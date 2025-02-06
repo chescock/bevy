@@ -329,7 +329,7 @@ where
         item: &P,
     ) -> Result<(), DrawError> {
         let param = self.state.get_manual(world);
-        let view = match self.view.get_manual(world, view) {
+        let view = match self.view.query_manual(world).get_inner(view) {
             Ok(view) => view,
             Err(err) => match err {
                 QueryEntityError::EntityDoesNotExist(_) => {
@@ -342,7 +342,11 @@ where
             },
         };
 
-        let entity = self.entity.get_manual(world, item.entity()).ok();
+        let entity = self
+            .entity
+            .query_manual(world)
+            .get_inner(item.entity())
+            .ok();
         match C::render(item, view, entity, param, pass) {
             RenderCommandResult::Success | RenderCommandResult::Skip => Ok(()),
             RenderCommandResult::Failure(reason) => Err(DrawError::RenderCommandFailure(reason)),

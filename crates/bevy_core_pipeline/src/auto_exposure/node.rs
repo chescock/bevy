@@ -67,7 +67,7 @@ impl Node for AutoExposureNode {
             Ok((view_uniform_offset, view_target, auto_exposure, view)),
             Some(auto_exposure_buffers),
         ) = (
-            self.query.get_manual(world, view_entity),
+            self.query.query_manual(world).get_inner(view_entity),
             auto_exposure_buffers.buffers.get(&view_entity),
         )
         else {

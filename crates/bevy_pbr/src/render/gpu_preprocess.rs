@@ -633,8 +633,10 @@ impl Node for EarlyGpuPreprocessNode {
 
         let mut all_views: SmallVec<[_; 8]> = SmallVec::new();
         all_views.push(graph.view_entity());
-        if let Ok(shadow_cascade_views) =
-            self.main_view_query.get_manual(world, graph.view_entity())
+        if let Ok(shadow_cascade_views) = self
+            .main_view_query
+            .query_manual(world)
+            .get_inner(graph.view_entity())
         {
             all_views.extend(shadow_cascade_views.lights.iter().copied());
         }
@@ -648,7 +650,7 @@ impl Node for EarlyGpuPreprocessNode {
                 view_uniform_offset,
                 no_indirect_drawing,
                 occlusion_culling,
-            )) = self.view_query.get_manual(world, view_entity)
+            )) = self.view_query.query_manual(world).get_inner(view_entity)
             else {
                 continue;
             };
@@ -868,7 +870,7 @@ impl Node for LateGpuPreprocessNode {
                 });
 
         // Run the compute passes.
-        for (view, bind_groups, view_uniform_offset) in self.view_query.iter_manual(world) {
+        for (view, bind_groups, view_uniform_offset) in self.view_query.query_manual(world) {
             let maybe_pipeline_id = preprocess_pipelines
                 .late_gpu_occlusion_culling_preprocess
                 .pipeline_id;
@@ -993,7 +995,13 @@ impl Node for EarlyPrepassBuildIndirectParametersNode {
 
         // If there are no views with a depth prepass enabled, we don't need to
         // run this.
-        if self.view_query.iter_manual(world).next().is_none() {
+        if self
+            .view_query
+            .query_manual(world)
+            .into_iter()
+            .next()
+            .is_none()
+        {
             return Ok(());
         }
 
@@ -1021,7 +1029,13 @@ impl Node for LatePrepassBuildIndirectParametersNode {
 
         // If there are no views with occlusion culling enabled, we don't need
         // to run this.
-        if self.view_query.iter_manual(world).next().is_none() {
+        if self
+            .view_query
+            .query_manual(world)
+            .into_iter()
+            .next()
+            .is_none()
+        {
             return Ok(());
         }
 

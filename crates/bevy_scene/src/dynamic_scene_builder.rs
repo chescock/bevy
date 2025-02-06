@@ -540,7 +540,7 @@ mod tests {
 
         let mut query = world.query_filtered::<Entity, With<ComponentA>>();
         let scene = DynamicSceneBuilder::from_world(&world)
-            .extract_entities(query.iter(&world))
+            .extract_entities(query.query(&world).into_iter())
             .build();
 
         assert_eq!(scene.entities.len(), 2);

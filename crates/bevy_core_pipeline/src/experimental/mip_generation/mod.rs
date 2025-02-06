@@ -186,7 +186,8 @@ impl Node for DownsampleDepthNode {
             maybe_view_light_entities,
         )) = self
             .main_view_query
-            .get_manual(world, render_graph_context.view_entity())
+            .query_manual(world)
+            .get_inner(render_graph_context.view_entity())
         else {
             return Ok(());
         };
@@ -209,7 +210,9 @@ impl Node for DownsampleDepthNode {
         if let Some(view_light_entities) = maybe_view_light_entities {
             for &view_light_entity in &view_light_entities.0 {
                 let Ok((view_depth_pyramid, view_downsample_depth_bind_group, occlusion_culling)) =
-                    self.shadow_view_query.get_manual(world, view_light_entity)
+                    self.shadow_view_query
+                        .query_manual(world)
+                        .get_inner(view_light_entity)
                 else {
                     continue;
                 };

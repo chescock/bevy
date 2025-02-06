@@ -410,7 +410,11 @@ where
         render_context: &mut RenderContext<'w>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
-        let Ok(view) = self.view_query.get_manual(world, graph.view_entity()) else {
+        let Ok(view) = self
+            .view_query
+            .query_manual(world)
+            .get_inner(graph.view_entity())
+        else {
             return Ok(());
         };
 
