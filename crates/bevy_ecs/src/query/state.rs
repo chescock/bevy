@@ -459,6 +459,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// [`Added`]: crate::query::Added
     /// [`Changed`]: crate::query::Changed
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query(world).is_empty()` or `query_unchecked_manual_with_ticks(world.as_unsafe_world_cell_readonly(), last_run, this_run).is_empty()`"
+    )]
     pub fn is_empty(&self, world: &World, last_run: Tick, this_run: Tick) -> bool {
         self.validate_world(world.id());
         // SAFETY:
@@ -478,6 +482,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// This is always guaranteed to run in `O(1)` time.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query(world).contains(entity)` or `query_unchecked_manual_with_ticks(world.as_unsafe_world_cell_readonly(), last_run, this_run).contains(entity)`"
+    )]
     pub fn contains(&self, entity: Entity, world: &World, last_run: Tick, this_run: Tick) -> bool {
         self.validate_world(world.id());
         // SAFETY:
@@ -910,6 +918,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// This is always guaranteed to run in `O(1)` time.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query(world).get_inner(entity)`")]
     pub fn get<'w>(
         &mut self,
         world: &'w World,
@@ -951,6 +960,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// assert_eq!(match query_state.get_many(&mut world, [wrong_entity]).unwrap_err() {QueryEntityError::EntityDoesNotExist(error) => error.entity, _ => panic!()}, wrong_entity);
     /// ```
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query(world).get_many_inner(entities)`")]
     pub fn get_many<'w, const N: usize>(
         &mut self,
         world: &'w World,
@@ -963,6 +973,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// This is always guaranteed to run in `O(1)` time.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_mut(world).get_inner(entity)`")]
     pub fn get_mut<'w>(
         &mut self,
         world: &'w mut World,
@@ -1010,6 +1021,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// assert_eq!(query_state.get_many_mut(&mut world, [entities[0], entities[0]]).unwrap_err(), QueryEntityError::AliasedMutability(entities[0]));
     /// ```
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_mut(world).get_many_inner(entities)`"
+    )]
     pub fn get_many_mut<'w, const N: usize>(
         &mut self,
         world: &'w mut World,
@@ -1032,6 +1047,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// This is always guaranteed to run in `O(1)` time.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_manual(world).get_inner(entity)`")]
     pub fn get_manual<'w>(
         &self,
         world: &'w World,
@@ -1049,6 +1065,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
     /// have unique access to the components they query.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_unchecked(world).get_inner(entity)`"
+    )]
     pub unsafe fn get_unchecked<'w>(
         &mut self,
         world: UnsafeWorldCell<'w>,
@@ -1061,6 +1081,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// This can only be called for read-only queries, see [`Self::iter_mut`] for write-queries.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query(world).into_iter()`")]
     pub fn iter<'w, 's>(&'s mut self, world: &'w World) -> QueryIter<'w, 's, D::ReadOnly, F> {
         self.query(world).into_iter()
     }
@@ -1070,6 +1091,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This iterator is always guaranteed to return results from each matching entity once and only once.
     /// Iteration order is not guaranteed.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_mut(world).into_iter()`")]
     pub fn iter_mut<'w, 's>(&'s mut self, world: &'w mut World) -> QueryIter<'w, 's, D, F> {
         self.query_mut(world).into_iter()
     }
@@ -1082,6 +1104,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// This can only be called for read-only queries.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_manual(world).into_iter()`")]
     pub fn iter_manual<'w, 's>(&'s self, world: &'w World) -> QueryIter<'w, 's, D::ReadOnly, F> {
         self.query_manual(world).into_iter()
     }
@@ -1111,6 +1134,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This can only be called for read-only queries, see [`Self::iter_combinations_mut`] for
     /// write-queries.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query(world).iter_combinations_inner()`"
+    )]
     pub fn iter_combinations<'w, 's, const K: usize>(
         &'s mut self,
         world: &'w World,
@@ -1136,6 +1163,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// The `iter_combinations_mut` method does not guarantee order of iteration.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_mut(world).iter_combinations_inner()`"
+    )]
     pub fn iter_combinations_mut<'w, 's, const K: usize>(
         &'s mut self,
         world: &'w mut World,
@@ -1152,6 +1183,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// - [`iter_many_mut`](Self::iter_many_mut) to get mutable query items.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query(world).iter_many_inner(entities)`"
+    )]
     pub fn iter_many<'w, 's, EntityList: IntoIterator<Item: EntityBorrow>>(
         &'s mut self,
         world: &'w World,
@@ -1175,6 +1210,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// - [`iter_many`](Self::iter_many) to update archetypes.
     /// - [`iter_manual`](Self::iter_manual) to iterate over all query items.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_manual(world).iter_many_inner(entities)`"
+    )]
     pub fn iter_many_manual<'w, 's, EntityList: IntoIterator<Item: EntityBorrow>>(
         &'s self,
         world: &'w World,
@@ -1188,6 +1227,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// Items are returned in the order of the list of entities.
     /// Entities that don't match the query are skipped.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_mut(world).iter_many_inner(entities)`"
+    )]
     pub fn iter_many_mut<'w, 's, EntityList: IntoIterator<Item: EntityBorrow>>(
         &'s mut self,
         world: &'w mut World,
@@ -1205,6 +1248,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// - [`iter_many_unique_mut`](Self::iter_many_unique_mut) to get mutable query items.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query(world).iter_many_unique_inner(entities)`"
+    )]
     pub fn iter_many_unique<'w, 's, EntityList: EntitySet>(
         &'s mut self,
         world: &'w World,
@@ -1229,6 +1276,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// - [`iter_many`](Self::iter_many) to iterate over a non-unique entity list.
     /// - [`iter_manual`](Self::iter_manual) to iterate over all query items.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_manual(world).iter_many_unique_inner(entities)`"
+    )]
     pub fn iter_many_unique_manual<'w, 's, EntityList: EntitySet>(
         &'s self,
         world: &'w World,
@@ -1242,6 +1293,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// Items are returned in the order of the list of entities.
     /// Entities that don't match the query are skipped.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_mut(world).iter_many_unique_inner(entities)`"
+    )]
     pub fn iter_many_unique_mut<'w, 's, EntityList: EntitySet>(
         &'s mut self,
         world: &'w mut World,
@@ -1259,6 +1314,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
     /// have unique access to the components they query.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_unchecked(world).into_iter()`")]
     pub unsafe fn iter_unchecked<'w, 's>(
         &'s mut self,
         world: UnsafeWorldCell<'w>,
@@ -1278,6 +1334,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
     /// have unique access to the components they query.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_unchecked(world).iter_combinations_inner()`"
+    )]
     pub unsafe fn iter_combinations_unchecked<'w, 's, const K: usize>(
         &'s mut self,
         world: UnsafeWorldCell<'w>,
@@ -1294,6 +1354,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// [`par_iter_mut`]: Self::par_iter_mut
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query(world).par_iter_inner()`")]
     pub fn par_iter<'w, 's>(
         &'s mut self,
         world: &'w World,
@@ -1346,6 +1407,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// [`par_iter`]: Self::par_iter
     /// [`ComputeTaskPool`]: bevy_tasks::ComputeTaskPool
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_mut(world).par_iter_inner()`")]
     pub fn par_iter_mut<'w, 's>(&'s mut self, world: &'w mut World) -> QueryParIter<'w, 's, D, F> {
         self.query_mut(world).par_iter_inner()
     }
@@ -1666,6 +1728,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// Simply unwrapping the [`Result`] also works, but should generally be reserved for tests.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query(world).single_inner()`")]
     pub fn single<'w>(&mut self, world: &'w World) -> Result<ROQueryItem<'w, D>, QuerySingleError> {
         self.query(world).single_inner()
     }
@@ -1690,6 +1753,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     ///
     /// Please see [`Query::single`] for advice on handling the error.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `query_mut(world).single_inner()`")]
     pub fn single_mut<'w>(
         &mut self,
         world: &'w mut World,
@@ -1716,6 +1780,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This does not check for mutable query correctness. To be safe, make sure mutable queries
     /// have unique access to the components they query.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_unchecked(world).single_inner()`"
+    )]
     pub unsafe fn single_unchecked<'w>(
         &mut self,
         world: UnsafeWorldCell<'w>,
@@ -1736,6 +1804,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This does not validate that `world.id()` matches `self.world_id`. Calling this on a `world`
     /// with a mismatched [`WorldId`] is unsound.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `query_unchecked_manual_with_ticks(world, last_run, this_run).single_inner()`"
+    )]
     pub unsafe fn single_unchecked_manual<'w>(
         &self,
         world: UnsafeWorldCell<'w>,
