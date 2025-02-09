@@ -532,12 +532,7 @@ mod tests {
         let mut world = World::new();
         world.spawn((TableStored("abc"), A(123)));
         world.spawn((TableStored("def"), A(456)));
-        assert!(world
-            .query::<(&B, &A)>()
-            .query(&world)
-            .into_iter()
-            .next()
-            .is_none());
+        assert!(world.query::<(&B, &A)>().query(&world).is_empty());
     }
 
     #[test]

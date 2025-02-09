@@ -995,13 +995,7 @@ impl Node for EarlyPrepassBuildIndirectParametersNode {
 
         // If there are no views with a depth prepass enabled, we don't need to
         // run this.
-        if self
-            .view_query
-            .query_manual(world)
-            .into_iter()
-            .next()
-            .is_none()
-        {
+        if self.view_query.query_manual(world).is_empty() {
             return Ok(());
         }
 
@@ -1029,13 +1023,7 @@ impl Node for LatePrepassBuildIndirectParametersNode {
 
         // If there are no views with occlusion culling enabled, we don't need
         // to run this.
-        if self
-            .view_query
-            .query_manual(world)
-            .into_iter()
-            .next()
-            .is_none()
-        {
+        if self.view_query.query_manual(world).is_empty() {
             return Ok(());
         }
 
