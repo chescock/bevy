@@ -13,8 +13,8 @@ use crate::{
 #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
 use crate::entity::{TrustedEntityBorrow, UniqueEntitySlice};
 
-use alloc::vec::Vec;
-use core::{fmt, ptr};
+use alloc::vec::{self, Vec};
+use core::{borrow::Borrow, fmt, iter, ptr, slice};
 use fixedbitset::FixedBitSet;
 use log::warn;
 #[cfg(feature = "trace")]
@@ -42,7 +42,7 @@ use super::{
 /// Must be initialized and accessed as a [`TableId`], if both generic parameters to the query are dense.
 /// Must be initialized and accessed as an [`ArchetypeId`] otherwise.
 #[derive(Clone, Copy)]
-pub(super) union StorageId {
+pub union StorageId {
     pub(super) table_id: TableId,
     pub(super) archetype_id: ArchetypeId,
 }
@@ -84,6 +84,81 @@ pub struct QueryState<D: QueryData, F: QueryFilter = ()> {
     par_iter_span: Span,
 }
 
+/// Abstracts over an owned or borrowed [`QueryState`].
+pub trait QueryStateBorrow: Borrow<QueryState<Self::Data, Self::Filter>> {
+    /// The [`QueryData`] for this `QueryState`.
+    type Data: QueryData;
+
+    /// The [`QueryFilter`] for this `QueryState`.
+    type Filter: QueryFilter;
+
+    /// The type returned by [`Self::storage_ids`].
+    type StorageIter: Iterator<Item = StorageId> + Clone + Default;
+
+    /// A read-only version of the state.
+    type ReadOnly: QueryStateBorrow<
+        Data = <Self::Data as QueryData>::ReadOnly,
+        Filter = Self::Filter,
+    >;
+
+    /// Iterates the storage ids that this [`QueryState`] matches.
+    fn storage_ids(&self) -> Self::StorageIter;
+
+    /// Borrows the remainder of the [`Self::StorageIter`] as an iterator
+    /// usable with `&QueryState<D, F>`.
+    fn reborrow_storage_ids(
+        storage_iter: &Self::StorageIter,
+    ) -> iter::Copied<slice::Iter<StorageId>>;
+
+    /// Converts this state to a read-only version.
+    fn into_readonly(self) -> Self::ReadOnly;
+}
+
+impl<D: QueryData, F: QueryFilter> QueryStateBorrow for QueryState<D, F> {
+    type Data = D;
+    type Filter = F;
+    type StorageIter = vec::IntoIter<StorageId>;
+    type ReadOnly = QueryState<D::ReadOnly, F>;
+
+    fn storage_ids(&self) -> Self::StorageIter {
+        // Query iteration holds both the state and the storage iterator,
+        // so the iterator cannot borrow from the state,
+        // which requires us to `clone` the `Vec` here.
+        self.matched_storage_ids.clone().into_iter()
+    }
+
+    fn reborrow_storage_ids(
+        storage_iter: &Self::StorageIter,
+    ) -> iter::Copied<slice::Iter<StorageId>> {
+        storage_iter.as_slice().iter().copied()
+    }
+
+    fn into_readonly(self) -> Self::ReadOnly {
+        self.into_readonly()
+    }
+}
+
+impl<'s, D: QueryData, F: QueryFilter> QueryStateBorrow for &'s QueryState<D, F> {
+    type Data = D;
+    type Filter = F;
+    type StorageIter = iter::Copied<slice::Iter<'s, StorageId>>;
+    type ReadOnly = &'s QueryState<D::ReadOnly, F>;
+
+    fn storage_ids(&self) -> Self::StorageIter {
+        self.matched_storage_ids.iter().copied()
+    }
+
+    fn reborrow_storage_ids(
+        storage_iter: &Self::StorageIter,
+    ) -> iter::Copied<slice::Iter<StorageId>> {
+        storage_iter.clone()
+    }
+
+    fn into_readonly(self) -> Self::ReadOnly {
+        self.as_readonly()
+    }
+}
+
 impl<D: QueryData, F: QueryFilter> fmt::Debug for QueryState<D, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("QueryState")
@@ -109,6 +184,26 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // SAFETY: invariant on `WorldQuery` trait upholds that `D::ReadOnly` and `F::ReadOnly`
         // have a subset of the access, and match the exact same archetypes/tables as `D`/`F` respectively.
         unsafe { self.as_transmuted_state::<D::ReadOnly, F>() }
+    }
+
+    fn into_readonly(mut self) -> QueryState<D::ReadOnly, F> {
+        // This is not strictly necessary, since a `&QueryState`
+        // created using `as_readonly()` would have the full access,
+        // but it may avoid needing to clone the access later.
+        self.component_access.access_mut().clear_writes();
+        QueryState {
+            world_id: self.world_id,
+            archetype_generation: self.archetype_generation,
+            matched_tables: self.matched_tables,
+            matched_archetypes: self.matched_archetypes,
+            component_access: self.component_access,
+            matched_storage_ids: self.matched_storage_ids,
+            is_dense: self.is_dense,
+            fetch_state: self.fetch_state,
+            filter_state: self.filter_state,
+            #[cfg(feature = "trace")]
+            par_iter_span: self.par_iter_span,
+        }
     }
 
     /// Converts this `QueryState` reference to a `QueryState` that does not return any data
@@ -1082,7 +1177,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This can only be called for read-only queries, see [`Self::iter_mut`] for write-queries.
     #[inline]
     #[deprecated(since = "0.16.0", note = "Use `query(world).into_iter()`")]
-    pub fn iter<'w, 's>(&'s mut self, world: &'w World) -> QueryIter<'w, 's, D::ReadOnly, F> {
+    pub fn iter<'w, 's>(
+        &'s mut self,
+        world: &'w World,
+    ) -> QueryIter<'w, &'s QueryState<D::ReadOnly, F>> {
         self.query(world).into_iter()
     }
 
@@ -1092,7 +1190,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// Iteration order is not guaranteed.
     #[inline]
     #[deprecated(since = "0.16.0", note = "Use `query_mut(world).into_iter()`")]
-    pub fn iter_mut<'w, 's>(&'s mut self, world: &'w mut World) -> QueryIter<'w, 's, D, F> {
+    pub fn iter_mut<'w, 's>(&'s mut self, world: &'w mut World) -> QueryIter<'w, &'s Self> {
         self.query_mut(world).into_iter()
     }
 
@@ -1105,7 +1203,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// This can only be called for read-only queries.
     #[inline]
     #[deprecated(since = "0.16.0", note = "Use `query_manual(world).into_iter()`")]
-    pub fn iter_manual<'w, 's>(&'s self, world: &'w World) -> QueryIter<'w, 's, D::ReadOnly, F> {
+    pub fn iter_manual<'w, 's>(
+        &'s self,
+        world: &'w World,
+    ) -> QueryIter<'w, &'s QueryState<D::ReadOnly, F>> {
         self.query_manual(world).into_iter()
     }
 
@@ -1141,7 +1242,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     pub fn iter_combinations<'w, 's, const K: usize>(
         &'s mut self,
         world: &'w World,
-    ) -> QueryCombinationIter<'w, 's, D::ReadOnly, F, K> {
+    ) -> QueryCombinationIter<'w, &'s QueryState<D::ReadOnly, F>, K> {
         self.query(world).iter_combinations_inner()
     }
 
@@ -1170,7 +1271,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     pub fn iter_combinations_mut<'w, 's, const K: usize>(
         &'s mut self,
         world: &'w mut World,
-    ) -> QueryCombinationIter<'w, 's, D, F, K> {
+    ) -> QueryCombinationIter<'w, &'s Self, K> {
         self.query_mut(world).iter_combinations_inner()
     }
 
@@ -1191,7 +1292,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s mut self,
         world: &'w World,
         entities: EntityList,
-    ) -> QueryManyIter<'w, 's, D::ReadOnly, F, EntityList::IntoIter> {
+    ) -> QueryManyIter<'w, &'s QueryState<D::ReadOnly, F>, EntityList::IntoIter> {
         self.query(world).iter_many_inner(entities)
     }
 
@@ -1218,7 +1319,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s self,
         world: &'w World,
         entities: EntityList,
-    ) -> QueryManyIter<'w, 's, D::ReadOnly, F, EntityList::IntoIter> {
+    ) -> QueryManyIter<'w, &'s QueryState<D::ReadOnly, F>, EntityList::IntoIter> {
         self.query_manual(world).iter_many_inner(entities)
     }
 
@@ -1235,7 +1336,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s mut self,
         world: &'w mut World,
         entities: EntityList,
-    ) -> QueryManyIter<'w, 's, D, F, EntityList::IntoIter> {
+    ) -> QueryManyIter<'w, &'s Self, EntityList::IntoIter> {
         self.query_mut(world).iter_many_inner(entities)
     }
 
@@ -1256,7 +1357,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s mut self,
         world: &'w World,
         entities: EntityList,
-    ) -> QueryManyUniqueIter<'w, 's, D::ReadOnly, F, EntityList::IntoIter> {
+    ) -> QueryManyUniqueIter<'w, &'s QueryState<D::ReadOnly, F>, EntityList::IntoIter> {
         self.query(world).iter_many_unique_inner(entities)
     }
 
@@ -1284,7 +1385,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s self,
         world: &'w World,
         entities: EntityList,
-    ) -> QueryManyUniqueIter<'w, 's, D::ReadOnly, F, EntityList::IntoIter> {
+    ) -> QueryManyUniqueIter<'w, &'s QueryState<D::ReadOnly, F>, EntityList::IntoIter> {
         self.query_manual(world).iter_many_unique_inner(entities)
     }
 
@@ -1301,7 +1402,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         &'s mut self,
         world: &'w mut World,
         entities: EntityList,
-    ) -> QueryManyUniqueIter<'w, 's, D, F, EntityList::IntoIter> {
+    ) -> QueryManyUniqueIter<'w, &'s Self, EntityList::IntoIter> {
         self.query_mut(world).iter_many_unique_inner(entities)
     }
     /// Returns an [`Iterator`] over the query results for the given [`World`].
@@ -1318,7 +1419,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     pub unsafe fn iter_unchecked<'w, 's>(
         &'s mut self,
         world: UnsafeWorldCell<'w>,
-    ) -> QueryIter<'w, 's, D, F> {
+    ) -> QueryIter<'w, &'s Self> {
         self.query_unchecked(world).into_iter()
     }
 
@@ -1341,7 +1442,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     pub unsafe fn iter_combinations_unchecked<'w, 's, const K: usize>(
         &'s mut self,
         world: UnsafeWorldCell<'w>,
-    ) -> QueryCombinationIter<'w, 's, D, F, K> {
+    ) -> QueryCombinationIter<'w, &'s Self, K> {
         self.query_unchecked(world).iter_combinations_inner()
     }
 
@@ -1358,7 +1459,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     pub fn par_iter<'w, 's>(
         &'s mut self,
         world: &'w World,
-    ) -> QueryParIter<'w, 's, D::ReadOnly, F> {
+    ) -> QueryParIter<'w, &'s QueryState<D::ReadOnly, F>> {
         self.query(world).par_iter_inner()
     }
 
@@ -1408,7 +1509,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// [`ComputeTaskPool`]: bevy_tasks::ComputeTaskPool
     #[inline]
     #[deprecated(since = "0.16.0", note = "Use `query_mut(world).par_iter_inner()`")]
-    pub fn par_iter_mut<'w, 's>(&'s mut self, world: &'w mut World) -> QueryParIter<'w, 's, D, F> {
+    pub fn par_iter_mut<'w, 's>(&'s mut self, world: &'w mut World) -> QueryParIter<'w, &'s Self> {
         self.query_mut(world).par_iter_inner()
     }
 
