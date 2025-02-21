@@ -52,7 +52,7 @@ use crate::{
     resource::Resource,
     schedule::{Schedule, ScheduleLabel, Schedules},
     storage::{ResourceData, Storages},
-    system::Commands,
+    system::{Commands, QueryLens},
     world::{
         command_queue::RawCommandQueue,
         error::{
@@ -1428,6 +1428,10 @@ impl World {
     ///     (b, &Order(3), &Label("third")),
     /// ]);
     /// ```
+    ///
+    /// # See also
+    /// - [`query_filtered`](Self::query_filtered) to create a query state with a [`QueryFilter`].
+    /// - [`query_uncached_mut`](Self::query_uncached_mut) to create a [`QueryLens`] that can be immediately queried without needing a local variable.
     #[inline]
     pub fn query<D: QueryData>(&mut self) -> QueryState<D, ()> {
         self.query_filtered::<D, ()>()
@@ -1452,6 +1456,10 @@ impl World {
     ///
     /// assert_eq!(matching_entities, vec![e2]);
     /// ```
+    ///
+    /// # See also
+    /// - [`query`](Self::query) to create a query state with no [`QueryFilter`].
+    /// - [`query_uncached_filtered_mut`](Self::query_uncached_filtered_mut) to create a [`QueryLens`] that can be immediately queried without needing a local variable.
     #[inline]
     pub fn query_filtered<D: QueryData, F: QueryFilter>(&mut self) -> QueryState<D, F> {
         QueryState::new(self)
@@ -1533,6 +1541,88 @@ impl World {
     #[inline]
     pub fn try_query_filtered<D: QueryData, F: QueryFilter>(&self) -> Option<QueryState<D, F>> {
         QueryState::try_new(self)
+    }
+
+    /// Returns a [`QueryLens`] for the given [`QueryData`],
+    /// which allows a query to be run directly without storing anything in local variables.
+    ///
+    /// Note that this constructs a new [`QueryState`] on every call and may be expensive.
+    /// If you need to make the same query repeatedly,
+    /// consider using [`Self::query`] to construct a [`QueryState`],
+    /// then re-using it with [`QueryState::query_mut`].
+    /// ```
+    /// use bevy_ecs::{component::Component, entity::Entity, world::World};
+    ///
+    /// #[derive(Component, Debug, PartialEq)]
+    /// struct Position {
+    ///   x: f32,
+    ///   y: f32,
+    /// }
+    ///
+    /// #[derive(Component)]
+    /// struct Velocity {
+    ///   x: f32,
+    ///   y: f32,
+    /// }
+    ///
+    /// let mut world = World::new();
+    /// let entities = world.spawn_batch(vec![
+    ///     (Position { x: 0.0, y: 0.0}, Velocity { x: 1.0, y: 0.0 }),
+    ///     (Position { x: 0.0, y: 0.0}, Velocity { x: 0.0, y: 1.0 }),
+    /// ]).collect::<Vec<Entity>>();
+    ///
+    /// let query = world.query_uncached_mut::<(&mut Position, &Velocity)>();
+    /// for (mut position, velocity) in query {
+    ///    position.x += velocity.x;
+    ///    position.y += velocity.y;
+    /// }
+    ///
+    /// assert_eq!(world.get::<Position>(entities[0]).unwrap(), &Position { x: 1.0, y: 0.0 });
+    /// assert_eq!(world.get::<Position>(entities[1]).unwrap(), &Position { x: 0.0, y: 1.0 });
+    /// ```
+    ///
+    /// # See also
+    /// - [`query`](Self::query) to create query state that caches query data and may be efficiently reused.
+    /// - [`query_uncached_filtered_mut`](Self::query_uncached_filtered_mut) to create a [`QueryLens`] with a [`QueryFilter`].
+    pub fn query_uncached_mut<D: QueryData>(&mut self) -> QueryLens<D> {
+        self.query_uncached_filtered_mut()
+    }
+
+    /// Returns a [`QueryLens`] for the given filtered [`QueryData`],
+    /// which allows a query to be run directly without storing anything in local variables.
+    ///
+    /// Note that this constructs a new [`QueryState`] on every call and may be expensive.
+    /// If you need to make the same query repeatedly,
+    /// consider using [`Self::query_filtered`] to construct a [`QueryState`],
+    /// then re-using it with [`QueryState::query_mut`].
+    /// ```
+    /// use bevy_ecs::{component::Component, entity::Entity, world::World, query::With};
+    ///
+    /// #[derive(Component)]
+    /// struct A;
+    /// #[derive(Component)]
+    /// struct B;
+    ///
+    /// let mut world = World::new();
+    /// let e1 = world.spawn(A).id();
+    /// let e2 = world.spawn((A, B)).id();
+    ///
+    /// let matching_entities = world
+    ///     .query_uncached_filtered_mut::<Entity, With<B>>()
+    ///     .into_iter()
+    ///     .collect::<Vec<Entity>>();
+    ///
+    /// assert_eq!(matching_entities, vec![e2]);
+    /// ```
+    /// # See also
+    /// - [`query_filtered`](Self::query_filtered) to create query state that caches query data and may be efficiently reused.
+    /// - [`query_uncached_mut`](Self::query_uncached_mut) to create a [`QueryLens`] with no [`QueryFilter`].
+    pub fn query_uncached_filtered_mut<D: QueryData, F: QueryFilter>(&mut self) -> QueryLens<D, F> {
+        let state = self.query_filtered();
+        let last_run = self.last_change_tick();
+        let this_run = self.change_tick();
+        // SAFETY: We have exclusive access to the entire world.
+        unsafe { QueryLens::new(self.as_unsafe_world_cell(), state, last_run, this_run) }
     }
 
     /// Returns an iterator of entities that had components of type `T` removed
