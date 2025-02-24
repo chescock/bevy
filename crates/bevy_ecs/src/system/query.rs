@@ -7,11 +7,10 @@ use crate::{
         QueryFilter, QueryIter, QueryManyIter, QueryManyUniqueIter, QueryParIter, QueryParManyIter,
         QueryParManyUniqueIter, QuerySingleError, QueryState, ROQueryItem, ReadOnlyQueryData,
     },
-    world::unsafe_world_cell::UnsafeWorldCell,
+    world::{unsafe_world_cell::UnsafeWorldCell, WorldEntityFetch},
 };
 use core::{
     marker::PhantomData,
-    mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
 
@@ -508,24 +507,6 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`reborrow`](Self::reborrow) for the safe versions.
     pub unsafe fn reborrow_unsafe(&self) -> Query<'_, 's, D, F> {
-        // SAFETY:
-        // - This is memory safe because the caller ensures that there are no conflicting references.
-        // - The world matches because it was the same one used to construct self.
-        unsafe { self.copy_unsafe() }
-    }
-
-    /// Returns a new `Query` copying the access from this one.
-    /// The current query will still be usable while the new one exists, but must not be used in a way that violates aliasing.
-    ///
-    /// # Safety
-    ///
-    /// This function makes it possible to violate Rust's aliasing guarantees.
-    /// You must make sure this call does not result in a mutable or shared reference to a component with a mutable reference.
-    ///
-    /// # See also
-    ///
-    /// - [`reborrow_unsafe`](Self::reborrow_unsafe) for a safer version that constrains the returned `'w` lifetime to the length of the borrow.
-    unsafe fn copy_unsafe(&self) -> Query<'w, 's, D, F> {
         // SAFETY:
         // - This is memory safe because the caller ensures that there are no conflicting references.
         // - The world matches because it was the same one used to construct self.
@@ -1240,11 +1221,18 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
         }
     }
 
-    /// Returns the read-only query item for the given [`Entity`].
+    /// Returns the read-only query item for the given entities.
     ///
     /// In case of a nonexisting entity or mismatched component, a [`QueryEntityError`] is returned instead.
     ///
-    /// This is always guaranteed to run in `O(1)` time.
+    /// This function supports fetching a single entity or multiple entities:
+    /// - Pass an [`Entity`] to receive a single value.
+    /// - Pass a slice of [`Entity`]s to receive a [`Vec<D>`].
+    /// - Pass an array of [`Entity`]s to receive an equally-sized array of values.
+    /// - Pass a reference to a [`EntityHashSet`](crate::entity::hash_map::EntityHashMap) to receive an
+    ///   [`EntityHashMap<D>`](crate::entity::hash_map::EntityHashMap).
+    ///
+    /// This is always guaranteed to run in `O(N)` time, where N is the number of entities.
     ///
     /// # Example
     ///
@@ -1274,8 +1262,11 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_mut`](Self::get_mut) to get a mutable query item.
     #[inline]
-    pub fn get(&self, entity: Entity) -> Result<ROQueryItem<'_, D>, QueryEntityError> {
-        self.as_readonly().get_inner(entity)
+    pub fn get<E: WorldEntityFetch>(
+        &self,
+        entities: E,
+    ) -> Result<E::Data<'_, D::ReadOnly>, QueryEntityError> {
+        self.as_readonly().get_inner(entities)
     }
 
     /// Returns the read-only query items for the given array of [`Entity`].
@@ -1326,9 +1317,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
         &self,
         entities: [Entity; N],
     ) -> Result<[ROQueryItem<'_, D>; N], QueryEntityError> {
-        // Note that this calls `get_many_readonly` instead of `get_many_inner`
-        // since we don't need to check for duplicates.
-        self.as_readonly().get_many_readonly(entities)
+        self.get(entities)
     }
 
     /// Returns the read-only query items for the given array of [`Entity`].
@@ -1374,16 +1363,23 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many`](Self::get_many) for the non-panicking version.
     #[inline]
     #[track_caller]
-    pub fn many<const N: usize>(&self, entities: [Entity; N]) -> [ROQueryItem<'_, D>; N] {
-        match self.get_many(entities) {
+    pub fn many<E: WorldEntityFetch>(&self, entities: E) -> E::Data<'_, D::ReadOnly> {
+        match self.get(entities) {
             Ok(items) => items,
             Err(error) => panic!("Cannot get query results: {error}"),
         }
     }
 
-    /// Returns the query item for the given [`Entity`].
+    /// Returns the query item for the given entities.
     ///
     /// In case of a nonexisting entity or mismatched component, a [`QueryEntityError`] is returned instead.
+    ///
+    /// This function supports fetching a single entity or multiple entities:
+    /// - Pass an [`Entity`] to receive a single value.
+    /// - Pass a slice of [`Entity`]s to receive a [`Vec<D>`].
+    /// - Pass an array of [`Entity`]s to receive an equally-sized array of values.
+    /// - Pass a reference to a [`EntityHashSet`](crate::entity::hash_map::EntityHashMap) to receive an
+    ///   [`EntityHashMap<D>`](crate::entity::hash_map::EntityHashMap).
     ///
     /// This is always guaranteed to run in `O(1)` time.
     ///
@@ -1411,14 +1407,24 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get`](Self::get) to get a read-only query item.
     #[inline]
-    pub fn get_mut(&mut self, entity: Entity) -> Result<D::Item<'_>, QueryEntityError> {
-        self.reborrow().get_inner(entity)
+    pub fn get_mut<E: WorldEntityFetch>(
+        &mut self,
+        entities: E,
+    ) -> Result<E::Data<'_, D>, QueryEntityError> {
+        self.reborrow().get_inner(entities)
     }
 
-    /// Returns the query item for the given [`Entity`].
+    /// Returns the query item for the given entities.
     /// This consumes the [`Query`] to return results with the actual "inner" world lifetime.
     ///
     /// In case of a nonexisting entity or mismatched component, a [`QueryEntityError`] is returned instead.
+    ///
+    /// This function supports fetching a single entity or multiple entities:
+    /// - Pass an [`Entity`] to receive a single value.
+    /// - Pass a slice of [`Entity`]s to receive a [`Vec<D>`].
+    /// - Pass an array of [`Entity`]s to receive an equally-sized array of values.
+    /// - Pass a reference to a [`EntityHashSet`](crate::entity::hash_map::EntityHashMap) to receive an
+    ///   [`EntityHashMap<D>`](crate::entity::hash_map::EntityHashMap).
     ///
     /// This is always guaranteed to run in `O(1)` time.
     ///
@@ -1426,9 +1432,27 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_mut`](Self::get_mut) to get the item using a mutable borrow of the [`Query`].
     #[inline]
-    pub fn get_inner(self, entity: Entity) -> Result<D::Item<'w>, QueryEntityError<'w>> {
-        // SAFETY: system runs without conflicts with other systems.
-        // same-system queries have runtime borrow checks when they conflict
+    pub fn get_inner<E: WorldEntityFetch>(
+        self,
+        entities: E,
+    ) -> Result<E::Data<'w, D>, QueryEntityError<'w>> {
+        entities.fetch_query_data(self)
+    }
+
+    /// Returns the query item for the given [`Entity`].
+    /// This returns results with the actual "inner" world lifetime, but does not consume the query.
+    ///
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that this is not called more than once with the same [`Entity`],
+    /// and that no other methods are called on the `Query`.
+    pub(crate) unsafe fn get_inner_unsafe(
+        &self,
+        entity: Entity,
+    ) -> Result<D::Item<'w>, QueryEntityError<'w>> {
+        // SAFETY: The `Query` has access to this data,
+        // and the caller ensures that no conflicting calls are made
         unsafe {
             let location = self
                 .world
@@ -1550,7 +1574,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
         &mut self,
         entities: [Entity; N],
     ) -> Result<[D::Item<'_>; N], QueryEntityError> {
-        self.reborrow().get_many_inner(entities)
+        self.get_mut(entities)
     }
 
     /// Returns the query items for the given array of [`Entity`].
@@ -1570,63 +1594,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
         self,
         entities: [Entity; N],
     ) -> Result<[D::Item<'w>; N], QueryEntityError<'w>> {
-        // Verify that all entities are unique
-        for i in 0..N {
-            for j in 0..i {
-                if entities[i] == entities[j] {
-                    return Err(QueryEntityError::AliasedMutability(entities[i]));
-                }
-            }
-        }
-
-        // SAFETY: All entities are unique, so the results don't alias.
-        unsafe { self.get_many_impl(entities) }
-    }
-
-    /// Returns the query items for the given array of [`Entity`].
-    /// This consumes the [`Query`] to return results with the actual "inner" world lifetime.
-    ///
-    /// The returned query items are in the same order as the input.
-    /// In case of a nonexisting entity or mismatched component, a [`QueryEntityError`] is returned instead.
-    ///
-    /// # See also
-    ///
-    /// - [`get_many`](Self::get_many) to get read-only query items without checking for duplicate entities.
-    /// - [`get_many_mut`](Self::get_many_mut) to get items using a mutable reference.
-    /// - [`get_many_inner`](Self::get_many_readonly) to get mutable query items with the actual "inner" world lifetime.
-    #[inline]
-    pub fn get_many_readonly<const N: usize>(
-        self,
-        entities: [Entity; N],
-    ) -> Result<[D::Item<'w>; N], QueryEntityError<'w>>
-    where
-        D: ReadOnlyQueryData,
-    {
-        // SAFETY: The query results are read-only, so they don't conflict if there are duplicate entities.
-        unsafe { self.get_many_impl(entities) }
-    }
-
-    /// Returns the query items for the given array of [`Entity`].
-    /// This consumes the [`Query`] to return results with the actual "inner" world lifetime.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the query data returned for the entities does not conflict,
-    /// either because they are all unique or because the data is read-only.
-    unsafe fn get_many_impl<const N: usize>(
-        self,
-        entities: [Entity; N],
-    ) -> Result<[D::Item<'w>; N], QueryEntityError<'w>> {
-        let mut values = [(); N].map(|_| MaybeUninit::uninit());
-
-        for (value, entity) in core::iter::zip(&mut values, entities) {
-            // SAFETY: The caller asserts that the results don't alias
-            let item = unsafe { self.copy_unsafe() }.get_inner(entity)?;
-            *value = MaybeUninit::new(item);
-        }
-
-        // SAFETY: Each value has been fully initialized.
-        Ok(values.map(|x| unsafe { x.assume_init() }))
+        self.get_inner(entities)
     }
 
     /// Returns the query items for the given array of [`Entity`].
@@ -1679,8 +1647,8 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`many`](Self::many) to get read-only query items.
     #[inline]
     #[track_caller]
-    pub fn many_mut<const N: usize>(&mut self, entities: [Entity; N]) -> [D::Item<'_>; N] {
-        match self.get_many_mut(entities) {
+    pub fn many_mut<E: WorldEntityFetch>(&mut self, entities: E) -> E::Data<'_, D> {
+        match self.get_mut(entities) {
             Ok(items) => items,
             Err(error) => panic!("Cannot get query result: {error}"),
         }
@@ -2586,11 +2554,14 @@ mod tests {
 
     #[test]
     fn get_many_uniqueness() {
+        #[derive(Component, Debug)]
+        struct C;
+
         let mut world = World::new();
 
-        let entities: Vec<Entity> = (0..10).map(|_| world.spawn_empty().id()).collect();
+        let entities: Vec<Entity> = (0..10).map(|_| world.spawn(C).id()).collect();
 
-        let mut query_state = world.query::<Entity>();
+        let mut query_state = world.query::<&mut C>();
 
         // It's best to test get_many_inner directly, as it is shared
         // We don't care about aliased mutability for the read-only equivalent
