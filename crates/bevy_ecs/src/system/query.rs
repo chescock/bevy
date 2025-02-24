@@ -1313,6 +1313,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many_mut`](Self::get_many_mut) to get mutable query items.
     /// - [`many`](Self::many) for the panicking version.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `get` instead.")]
     pub fn get_many<const N: usize>(
         &self,
         entities: [Entity; N],
@@ -1570,6 +1571,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many`](Self::get_many) to get read-only query items without checking for duplicate entities.
     /// - [`many_mut`](Self::many_mut) for the panicking version.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `get_mut` instead.")]
     pub fn get_many_mut<const N: usize>(
         &mut self,
         entities: [Entity; N],
@@ -1590,6 +1592,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many_readonly`](Self::get_many_readonly) to get read-only query items without checking for duplicate entities
     ///   with the actual "inner" world lifetime.
     #[inline]
+    #[deprecated(since = "0.16.0", note = "Use `get_inner` instead.")]
     pub fn get_many_inner<const N: usize>(
         self,
         entities: [Entity; N],
@@ -2569,13 +2572,13 @@ mod tests {
         // SAFETY: Query does not access world data.
         assert!(query_state
             .query_mut(&mut world)
-            .get_many_inner::<10>(entities.clone().try_into().unwrap())
+            .get_inner::<[_; 10]>(entities.clone().try_into().unwrap())
             .is_ok());
 
         assert_eq!(
             query_state
                 .query_mut(&mut world)
-                .get_many_inner([entities[0], entities[0]])
+                .get_inner([entities[0], entities[0]])
                 .unwrap_err(),
             QueryEntityError::AliasedMutability(entities[0])
         );
@@ -2583,7 +2586,7 @@ mod tests {
         assert_eq!(
             query_state
                 .query_mut(&mut world)
-                .get_many_inner([entities[0], entities[1], entities[0]])
+                .get_inner([entities[0], entities[1], entities[0]])
                 .unwrap_err(),
             QueryEntityError::AliasedMutability(entities[0])
         );
@@ -2591,7 +2594,7 @@ mod tests {
         assert_eq!(
             query_state
                 .query_mut(&mut world)
-                .get_many_inner([entities[9], entities[9]])
+                .get_inner([entities[9], entities[9]])
                 .unwrap_err(),
             QueryEntityError::AliasedMutability(entities[9])
         );
