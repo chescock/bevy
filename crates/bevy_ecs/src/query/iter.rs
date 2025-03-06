@@ -2609,7 +2609,7 @@ mod tests {
             world.spawn(Sparse(i));
         }
 
-        let mut query = world.query::<Entity>();
+        let mut query = world.query_state::<Entity>();
 
         let sort = query
             .query(&world)
@@ -2693,7 +2693,7 @@ mod tests {
         world.spawn((A(2.22),));
 
         {
-            let mut query = world.query::<&A>();
+            let mut query = world.query_state::<&A>();
             let mut iter = query.query(&world).into_iter();
             println!(
                 "archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
@@ -2723,7 +2723,7 @@ mod tests {
         world.spawn((Sparse(33),));
 
         {
-            let mut query = world.query::<&Sparse>();
+            let mut query = world.query_state::<&Sparse>();
             let mut iter = query.query(&world).into_iter();
             println!(
                 "before_next_call: archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
@@ -2748,7 +2748,7 @@ mod tests {
     fn empty_query_iter_sort_after_next_does_not_panic() {
         let mut world = World::new();
         {
-            let mut query = world.query::<(&A, &Sparse)>();
+            let mut query = world.query_state::<(&A, &Sparse)>();
             let mut iter = query.query(&world).into_iter();
             println!(
                 "before_next_call: archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
@@ -2776,7 +2776,7 @@ mod tests {
         world.spawn((A(1.1), Sparse(22)));
         world.spawn((A(2.22), Sparse(33)));
         {
-            let mut query = world.query::<(&A, &Sparse)>();
+            let mut query = world.query_state::<(&A, &Sparse)>();
             let mut iter = query.query(&world).into_iter();
             println!(
                 "before_next_call: archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
@@ -2811,7 +2811,7 @@ mod tests {
             .spawn_batch([A(0.), A(1.), A(2.), A(3.), A(4.)])
             .collect();
 
-        let mut query = world.query::<Entity>();
+        let mut query = world.query_state::<Entity>();
 
         let sort = query
             .query(&world)
@@ -2914,14 +2914,14 @@ mod tests {
             .spawn_batch([A(0.), A(1.), A(2.), A(3.), A(4.)])
             .collect();
 
-        let mut query = world.query::<Entity>();
+        let mut query = world.query_state::<Entity>();
         let mut iter = query.query(&world).iter_many_inner(entity_list);
 
         _ = iter.next();
 
         iter.sort::<Entity>();
 
-        let mut query_2 = world.query::<&mut A>();
+        let mut query_2 = world.query_state::<&mut A>();
         let mut iter_2 = query_2.query_mut(&mut world).iter_many_inner(entity_list);
 
         _ = iter_2.fetch_next();
@@ -2938,7 +2938,7 @@ mod tests {
 
         let mut world = World::new();
         let id = world.spawn(C(10)).id();
-        let mut query_state = world.query::<&mut C>();
+        let mut query_state = world.query_state::<&mut C>();
 
         {
             let mut query = query_state

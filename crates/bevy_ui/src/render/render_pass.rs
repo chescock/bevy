@@ -27,9 +27,9 @@ pub struct UiPassNode {
 impl UiPassNode {
     pub fn new(world: &mut World) -> Self {
         Self {
-            ui_view_query: world.query_filtered(),
-            ui_view_target_query: world.query(),
-            ui_camera_view_query: world.query(),
+            ui_view_query: world.query_state_filtered(),
+            ui_view_target_query: world.query_state(),
+            ui_camera_view_query: world.query_state(),
         }
     }
 }

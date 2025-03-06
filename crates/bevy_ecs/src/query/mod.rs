@@ -140,18 +140,18 @@ mod tests {
         world.spawn((A(1), B(1)));
         world.spawn(A(2));
         let values = world
-            .query::<&A>()
+            .query_state::<&A>()
             .query(&world)
             .into_iter()
             .collect::<HashSet<&A>>();
         assert!(values.contains(&A(1)));
         assert!(values.contains(&A(2)));
 
-        for (_a, mut b) in world.query::<(&A, &mut B)>().query_mut(&mut world) {
+        for (_a, mut b) in world.query_state::<(&A, &mut B)>().query_mut(&mut world) {
             b.0 = 3;
         }
         let values = world
-            .query::<&B>()
+            .query_state::<&B>()
             .query(&world)
             .into_iter()
             .collect::<Vec<&B>>();
@@ -173,7 +173,7 @@ mod tests {
             D: ReadOnlyQueryData,
             F: ArchetypeFilter,
         {
-            let mut query = world.query_filtered::<D, F>();
+            let mut query = world.query_state_filtered::<D, F>();
             let query_type = type_name::<QueryCombinationIter<&QueryState<D, F>, K>>();
             let iter = query.query(world).iter_combinations_inner::<K>();
             assert_all_sizes_iterator_equal(iter, expected_size, 0, query_type);
@@ -187,7 +187,7 @@ mod tests {
             D: ReadOnlyQueryData,
             F: ArchetypeFilter,
         {
-            let mut query = world.query_filtered::<D, F>();
+            let mut query = world.query_state_filtered::<D, F>();
             let query_type = type_name::<QueryState<D, F>>();
             assert_all_exact_sizes_iterator_equal(
                 query.query(world).into_iter(),
@@ -333,7 +333,7 @@ mod tests {
         world.spawn(A(4));
 
         let values: HashSet<[&A; 2]> = world
-            .query::<&A>()
+            .query_state::<&A>()
             .query(&world)
             .iter_combinations_inner()
             .collect();
@@ -348,7 +348,7 @@ mod tests {
                 [&A(3), &A(4)],
             ]),
         );
-        let mut a_query = world.query::<&A>();
+        let mut a_query = world.query_state::<&A>();
 
         let values: HashSet<[&A; 3]> = a_query.query(&world).iter_combinations_inner().collect();
         check_combinations(
@@ -361,7 +361,7 @@ mod tests {
             ]),
         );
 
-        let mut b_query = world.query::<&B>();
+        let mut b_query = world.query_state::<&B>();
         assert_eq!(
             b_query
                 .query(&world)
@@ -384,7 +384,7 @@ mod tests {
         world.spawn(A(3));
         world.spawn(A(4));
 
-        let mut a_wout_b = world.query_filtered::<&A, Without<B>>();
+        let mut a_wout_b = world.query_state_filtered::<&A, Without<B>>();
         let values: HashSet<[&A; 2]> = a_wout_b.query(&world).iter_combinations_inner().collect();
         check_combinations(
             values,
@@ -394,7 +394,7 @@ mod tests {
         let values: HashSet<[&A; 3]> = a_wout_b.query(&world).iter_combinations_inner().collect();
         check_combinations(values, HashSet::from([[&A(2), &A(3), &A(4)]]));
 
-        let mut query = world.query_filtered::<&A, Or<(With<A>, With<B>)>>();
+        let mut query = world.query_state_filtered::<&A, Or<(With<A>, With<B>)>>();
         let values: HashSet<[&A; 2]> = query.query(&world).iter_combinations_inner().collect();
         check_combinations(
             values,
@@ -408,7 +408,7 @@ mod tests {
             ]),
         );
 
-        let mut query = world.query_filtered::<&mut A, Without<B>>();
+        let mut query = world.query_state_filtered::<&mut A, Without<B>>();
         let mut combinations = query.query_mut(&mut world).iter_combinations_inner();
         while let Some([mut a, mut b, mut c]) = combinations.fetch_next() {
             a.0 += 10;
@@ -427,7 +427,7 @@ mod tests {
         world.spawn((A(3), B(3)));
         world.spawn((A(4), B(4)));
 
-        let mut query_added = world.query_filtered::<&A, Added<A>>();
+        let mut query_added = world.query_state_filtered::<&A, Added<A>>();
 
         world.clear_trackers();
         world.spawn(A(5));
@@ -473,7 +473,7 @@ mod tests {
         world.spawn_batch((1..=4).map(Sparse));
 
         let values: HashSet<[&Sparse; 3]> = world
-            .query::<&Sparse>()
+            .query_state::<&Sparse>()
             .query(&world)
             .iter_combinations_inner()
             .collect();
@@ -492,7 +492,7 @@ mod tests {
     fn get_many_only_mut_checks_duplicates() {
         let mut world = World::new();
         let id = world.spawn(A(10)).id();
-        let mut query_state = world.query::<&mut A>();
+        let mut query_state = world.query_state::<&mut A>();
         let mut query = query_state.query_mut(&mut world);
         let result = query.get_many([id, id]);
         assert_eq!(result, Ok([&A(10), &A(10)]));
@@ -508,19 +508,22 @@ mod tests {
         world.spawn(Sparse(2));
 
         let values = world
-            .query::<&Sparse>()
+            .query_state::<&Sparse>()
             .query(&world)
             .into_iter()
             .collect::<HashSet<&Sparse>>();
         assert!(values.contains(&Sparse(1)));
         assert!(values.contains(&Sparse(2)));
 
-        for (_a, mut b) in world.query::<(&Sparse, &mut B)>().query_mut(&mut world) {
+        for (_a, mut b) in world
+            .query_state::<(&Sparse, &mut B)>()
+            .query_mut(&mut world)
+        {
             b.0 = 3;
         }
 
         let values = world
-            .query::<&B>()
+            .query_state::<&B>()
             .query(&world)
             .into_iter()
             .collect::<Vec<&B>>();
@@ -536,7 +539,7 @@ mod tests {
         world.spawn(C(3));
 
         let values: Vec<(Option<&A>, Option<&B>)> = world
-            .query::<AnyOf<(&A, &B)>>()
+            .query_state::<AnyOf<(&A, &B)>>()
             .query(&world)
             .into_iter()
             .collect();
@@ -557,7 +560,7 @@ mod tests {
         world.spawn(A(4));
 
         let values: HashSet<(&A, bool)> = world
-            .query::<(&A, Has<B>)>()
+            .query_state::<(&A, Has<B>)>()
             .query(&world)
             .into_iter()
             .collect();
@@ -579,7 +582,7 @@ mod tests {
         }
 
         let mut world = World::new();
-        world.query::<SelfConflicting>();
+        world.query_state::<SelfConflicting>();
     }
 
     #[test]
@@ -615,13 +618,13 @@ mod tests {
             }
 
             let custom_param_data = world
-                .query::<CustomAB>()
+                .query_state::<CustomAB>()
                 .query(&world)
                 .into_iter()
                 .map(|item| (*item.a, *item.b))
                 .collect::<Vec<_>>();
             let normal_data = world
-                .query::<(&A, &B)>()
+                .query_state::<(&A, &B)>()
                 .query(&world)
                 .into_iter()
                 .map(|(a, b)| (*a, *b))
@@ -638,13 +641,13 @@ mod tests {
             }
 
             let custom_param_data = world
-                .query::<FancyParam>()
+                .query_state::<FancyParam>()
                 .query(&world)
                 .into_iter()
                 .map(|fancy| (fancy.e, *fancy.b, fancy.opt.copied()))
                 .collect::<Vec<_>>();
             let normal_data = world
-                .query::<(Entity, &B, Option<&Sparse>)>()
+                .query_state::<(Entity, &B, Option<&Sparse>)>()
                 .query(&world)
                 .into_iter()
                 .map(|(e, b, opt)| (e, *b, opt.copied()))
@@ -664,7 +667,7 @@ mod tests {
             }
 
             let custom_param_data = world
-                .query::<MatchEverything>()
+                .query_state::<MatchEverything>()
                 .query(&world)
                 .into_iter()
                 .map(
@@ -680,7 +683,7 @@ mod tests {
                 )
                 .collect::<Vec<_>>();
             let normal_data = world
-                .query::<(AnyOf<(&A, &B, &C)>, Option<(&B, &Sparse)>)>()
+                .query_state::<(AnyOf<(&A, &B, &C)>, Option<(&B, &Sparse)>)>()
                 .query(&world)
                 .into_iter()
                 .map(|((a, b, c), bsparse)| {
@@ -704,12 +707,12 @@ mod tests {
             }
 
             let custom_param_entities = world
-                .query_filtered::<Entity, (AOrBFilter, NoSparseThatsSlow)>()
+                .query_state_filtered::<Entity, (AOrBFilter, NoSparseThatsSlow)>()
                 .query(&world)
                 .into_iter()
                 .collect::<Vec<_>>();
             let normal_entities = world
-                .query_filtered::<Entity, (Or<(With<A>, With<B>)>, Without<Sparse>)>()
+                .query_state_filtered::<Entity, (Or<(With<A>, With<B>)>, Without<Sparse>)>()
                 .query(&world)
                 .into_iter()
                 .collect::<Vec<_>>();
@@ -724,12 +727,12 @@ mod tests {
             }
 
             let custom_param_entities = world
-                .query_filtered::<Entity, CSparseFilter>()
+                .query_state_filtered::<Entity, CSparseFilter>()
                 .query(&world)
                 .into_iter()
                 .collect::<Vec<_>>();
             let normal_entities = world
-                .query_filtered::<Entity, (With<C>, With<Sparse>)>()
+                .query_state_filtered::<Entity, (With<C>, With<Sparse>)>()
                 .query(&world)
                 .into_iter()
                 .collect::<Vec<_>>();
@@ -745,12 +748,12 @@ mod tests {
             }
 
             let custom_param_entities = world
-                .query_filtered::<Entity, WithoutComps>()
+                .query_state_filtered::<Entity, WithoutComps>()
                 .query(&world)
                 .into_iter()
                 .collect::<Vec<_>>();
             let normal_entities = world
-                .query_filtered::<Entity, (Without<A>, Without<B>, Without<C>)>()
+                .query_state_filtered::<Entity, (Without<A>, Without<B>, Without<C>)>()
                 .query(&world)
                 .into_iter()
                 .collect::<Vec<_>>();
@@ -765,13 +768,13 @@ mod tests {
             }
 
             let custom_param_data = world
-                .query::<IterCombAB>()
+                .query_state::<IterCombAB>()
                 .query(&world)
                 .iter_combinations_inner::<2>()
                 .map(|[item0, item1]| [(*item0.a, *item0.b), (*item1.a, *item1.b)])
                 .collect::<Vec<_>>();
             let normal_data = world
-                .query::<(&A, &B)>()
+                .query_state::<(&A, &B)>()
                 .query(&world)
                 .iter_combinations()
                 .map(|[(a0, b0), (a1, b1)]| [(*a0, *b0), (*a1, *b1)])
@@ -830,7 +833,7 @@ mod tests {
         let e = world.spawn(Foo).id();
 
         // state
-        let mut q = world.query::<&mut Foo>();
+        let mut q = world.query_state::<&mut Foo>();
         let _: Option<&Foo> = q.query(&world).into_iter().next();
         let _: Option<[&Foo; 2]> = q.query(&world).iter_combinations_inner::<2>().next();
         let _: Option<&Foo> = q.query_manual(&world).into_iter().next();
@@ -884,7 +887,7 @@ mod tests {
         world.clear_trackers();
 
         let values = world
-            .query::<&B>()
+            .query_state::<&B>()
             .query(&world)
             .into_iter()
             .collect::<Vec<&B>>();

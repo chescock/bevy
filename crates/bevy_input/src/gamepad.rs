@@ -2202,7 +2202,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2213,7 +2213,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<(&Gamepad, &GamepadSettings)>()
+                .query_state::<(&Gamepad, &GamepadSettings)>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2227,7 +2227,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2238,7 +2238,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<(&Gamepad, &GamepadSettings)>()
+                .query_state::<(&Gamepad, &GamepadSettings)>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2250,7 +2250,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_err());
@@ -2258,7 +2258,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&GamepadSettings>()
+            .query_state::<&GamepadSettings>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_ok());
@@ -2269,14 +2269,14 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_err());
         assert!(ctx
             .app
             .world_mut()
-            .query::<&GamepadSettings>()
+            .query_state::<&GamepadSettings>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_ok());
@@ -2288,7 +2288,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2301,7 +2301,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_err());
@@ -2309,7 +2309,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&GamepadSettings>()
+            .query_state::<&GamepadSettings>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_ok());
@@ -2322,7 +2322,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2333,7 +2333,7 @@ mod tests {
         let mut settings = ctx
             .app
             .world_mut()
-            .query::<&mut GamepadSettings>()
+            .query_state::<&mut GamepadSettings>()
             .query_mut(ctx.app.world_mut())
             .get_inner(entity)
             .expect("be alive");
@@ -2344,7 +2344,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2355,7 +2355,7 @@ mod tests {
         let settings = ctx
             .app
             .world_mut()
-            .query::<&GamepadSettings>()
+            .query_state::<&GamepadSettings>()
             .query(ctx.app.world())
             .get_inner(entity)
             .expect("be alive");
@@ -2368,7 +2368,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2380,7 +2380,7 @@ mod tests {
         assert_eq!(
             ctx.app
                 .world_mut()
-                .query::<&Gamepad>()
+                .query_state::<&Gamepad>()
                 .query(ctx.app.world())
                 .into_iter()
                 .len(),
@@ -2389,7 +2389,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<(Entity, &GamepadSettings)>()
+            .query_state::<(Entity, &GamepadSettings)>()
             .query(ctx.app.world())
             .get_inner(entity)
             .is_ok());
@@ -2705,7 +2705,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()
@@ -2727,7 +2727,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()
@@ -2753,7 +2753,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()
@@ -2764,7 +2764,7 @@ mod tests {
         assert!(!ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()
@@ -2814,7 +2814,7 @@ mod tests {
         assert!(!ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()
@@ -2860,7 +2860,7 @@ mod tests {
         assert!(ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()
@@ -2871,7 +2871,7 @@ mod tests {
         assert!(!ctx
             .app
             .world_mut()
-            .query::<&Gamepad>()
+            .query_state::<&Gamepad>()
             .query(ctx.app.world())
             .get_inner(entity)
             .unwrap()

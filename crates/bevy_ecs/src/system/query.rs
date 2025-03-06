@@ -1319,7 +1319,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, S: QueryStateBorrow<Data = D, Filter 
     ///
     /// world.spawn(A(73));
     ///
-    /// let mut query_state = world.query::<&A>();
+    /// let mut query_state = world.query_state::<&A>();
     /// let query = query_state.query(&world);
     ///
     /// let component_values = query.get_many(entities).unwrap();
@@ -1532,7 +1532,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, S: QueryStateBorrow<Data = D, Filter 
     /// let invalid_entity = world.spawn_empty().id();
     ///
     ///
-    /// let mut query_state = world.query::<&mut A>();
+    /// let mut query_state = world.query_state::<&mut A>();
     /// let mut query = query_state.query_mut(&mut world);
     ///
     /// let mut mutable_component_values = query.get_many_mut(entities).unwrap();
@@ -2009,8 +2009,8 @@ impl<'w, 's, D: QueryData, F: QueryFilter, S: QueryStateBorrow<Data = D, Filter 
     /// # fn assert_valid_transmute_filtered<OldD: QueryData, OldF: QueryFilter, NewD: QueryData, NewF: QueryFilter>() {
     /// #     let mut world = World::new();
     /// #     // Make sure all components in the new query are initialized
-    /// #     let state = world.query_filtered::<NewD, NewF>();
-    /// #     let state = world.query_filtered::<OldD, OldF>();
+    /// #     let state = world.query_state_filtered::<NewD, NewF>();
+    /// #     let state = world.query_state_filtered::<OldD, OldF>();
     /// #     state.transmute_filtered::<NewD, NewF>(&world);
     /// # }
     /// #
@@ -2536,7 +2536,7 @@ mod tests {
 
         let entities: Vec<Entity> = (0..10).map(|_| world.spawn_empty().id()).collect();
 
-        let mut query_state = world.query::<Entity>();
+        let mut query_state = world.query_state::<Entity>();
 
         // It's best to test get_many_inner directly, as it is shared
         // We don't care about aliased mutability for the read-only equivalent

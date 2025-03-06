@@ -316,7 +316,7 @@ impl Plugin for RenderPlugin {
 
                     let primary_window = app
                         .world_mut()
-                        .query_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
+                        .query_state_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
                         .query(app.world())
                         .single_inner()
                         .ok()

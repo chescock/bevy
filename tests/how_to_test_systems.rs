@@ -135,7 +135,7 @@ fn spawn_enemy_using_input_resource() {
     // Check resulting changes, one entity has been spawned with `Enemy` component
     assert_eq!(
         app.world_mut()
-            .query::<&Enemy>()
+            .query_state::<&Enemy>()
             .query(app.world())
             .into_iter()
             .len(),
@@ -153,7 +153,7 @@ fn spawn_enemy_using_input_resource() {
     // Check resulting changes, no new entity has been spawned
     assert_eq!(
         app.world_mut()
-            .query::<&Enemy>()
+            .query_state::<&Enemy>()
             .query(app.world())
             .into_iter()
             .len(),

@@ -725,7 +725,7 @@ mod tests {
         assert_eq!(
             3,
             dst_world
-                .query::<&Foo>()
+                .query_state::<&Foo>()
                 .query(&dst_world)
                 .into_iter()
                 .count()
@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(
             2,
             dst_world
-                .query::<&Bar>()
+                .query_state::<&Bar>()
                 .query(&dst_world)
                 .into_iter()
                 .count()
@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(
             1,
             dst_world
-                .query::<&Baz>()
+                .query_state::<&Baz>()
                 .query(&dst_world)
                 .into_iter()
                 .count()
@@ -783,20 +783,20 @@ mod tests {
         assert_scene_eq(&scene, &deserialized_scene);
 
         let bar_to_foo = dst_world
-            .query_filtered::<&MyEntityRef, Without<Foo>>()
+            .query_state_filtered::<&MyEntityRef, Without<Foo>>()
             .query(&dst_world)
             .single_inner()
             .cloned()
             .unwrap();
         let foo = dst_world
-            .query_filtered::<Entity, With<Foo>>()
+            .query_state_filtered::<Entity, With<Foo>>()
             .query(&dst_world)
             .single_inner()
             .unwrap();
 
         assert_eq!(foo, bar_to_foo.0);
         assert!(dst_world
-            .query_filtered::<&MyEntityRef, With<Foo>>()
+            .query_state_filtered::<&MyEntityRef, With<Foo>>()
             .query(&dst_world)
             .into_iter()
             .all(|r| world.get_entity(r.0).is_err()));
@@ -819,7 +819,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             &qux,
-            world.query::<&Qux>().query(&world).single_inner().unwrap()
+            world
+                .query_state::<&Qux>()
+                .query(&world)
+                .single_inner()
+                .unwrap()
         );
     }
 

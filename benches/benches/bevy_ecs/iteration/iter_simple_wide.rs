@@ -51,7 +51,7 @@ impl<'w> Benchmark<'w> {
             10_000,
         ));
 
-        let query = world.query();
+        let query = world.query_state();
         Self(world, query)
     }
 

@@ -534,7 +534,7 @@ mod tests {
 
         entity_sync_system(&mut main_world, &mut render_world);
 
-        let mut q = render_world.query_filtered::<Entity, With<MainEntity>>();
+        let mut q = render_world.query_state_filtered::<Entity, With<MainEntity>>();
 
         // Only one synchronized entity
         assert!(q.query(&render_world).into_iter().count() == 1);

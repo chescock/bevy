@@ -1393,7 +1393,7 @@ impl World {
     ///     (Position { x: 0.0, y: 0.0}, Velocity { x: 0.0, y: 1.0 }),
     /// ]).collect::<Vec<Entity>>();
     ///
-    /// let mut query = world.query::<(&mut Position, &Velocity)>();
+    /// let mut query = world.query_state::<(&mut Position, &Velocity)>();
     /// for (mut position, velocity) in query.query_mut(&mut world) {
     ///    position.x += velocity.x;
     ///    position.y += velocity.y;
@@ -1420,7 +1420,7 @@ impl World {
     /// let a = world.spawn((Order(2), Label("second"))).id();
     /// let b = world.spawn((Order(3), Label("third"))).id();
     /// let c = world.spawn((Order(1), Label("first"))).id();
-    /// let mut entities = world.query::<(Entity, &Order, &Label)>()
+    /// let mut entities = world.query_state::<(Entity, &Order, &Label)>()
     ///     .query(&world)
     ///     .into_iter()
     ///     .collect::<Vec<_>>();
@@ -1434,8 +1434,8 @@ impl World {
     /// ]);
     /// ```
     #[inline]
-    pub fn query<D: QueryData>(&mut self) -> QueryState<D, ()> {
-        self.query_filtered::<D, ()>()
+    pub fn query_state<D: QueryData>(&mut self) -> QueryState<D, ()> {
+        self.query_state_filtered::<D, ()>()
     }
 
     /// Returns [`QueryState`] for the given filtered [`QueryData`], which is used to efficiently
@@ -1452,13 +1452,13 @@ impl World {
     /// let e1 = world.spawn(A).id();
     /// let e2 = world.spawn((A, B)).id();
     ///
-    /// let mut query = world.query_filtered::<Entity, With<B>>();
+    /// let mut query = world.query_state_filtered::<Entity, With<B>>();
     /// let matching_entities = query.query(&world).into_iter().collect::<Vec<Entity>>();
     ///
     /// assert_eq!(matching_entities, vec![e2]);
     /// ```
     #[inline]
-    pub fn query_filtered<D: QueryData, F: QueryFilter>(&mut self) -> QueryState<D, F> {
+    pub fn query_state_filtered<D: QueryData, F: QueryFilter>(&mut self) -> QueryState<D, F> {
         QueryState::new(self)
     }
 
@@ -1480,7 +1480,7 @@ impl World {
     /// ]);
     ///
     /// fn get_positions(world: &World) -> Vec<(Entity, &Position)> {
-    ///     let mut query = world.try_query::<(Entity, &Position)>().unwrap();
+    ///     let mut query = world.try_query_state::<(Entity, &Position)>().unwrap();
     ///     query.query(world).into_iter().collect()
     /// }
     ///
@@ -1500,17 +1500,17 @@ impl World {
     ///
     /// let mut world = World::new();
     ///
-    /// let none_query = world.try_query::<&A>();
+    /// let none_query = world.try_query_state::<&A>();
     /// assert!(none_query.is_none());
     ///
     /// world.register_component::<A>();
     ///
-    /// let some_query = world.try_query::<&A>();
+    /// let some_query = world.try_query_state::<&A>();
     /// assert!(some_query.is_some());
     /// ```
     #[inline]
-    pub fn try_query<D: QueryData>(&self) -> Option<QueryState<D, ()>> {
-        self.try_query_filtered::<D, ()>()
+    pub fn try_query_state<D: QueryData>(&self) -> Option<QueryState<D, ()>> {
+        self.try_query_state_filtered::<D, ()>()
     }
 
     /// Returns [`QueryState`] for the given filtered [`QueryData`], which is used to efficiently
@@ -1527,7 +1527,7 @@ impl World {
     /// let e1 = world.spawn(A).id();
     /// let e2 = world.spawn((A, B)).id();
     ///
-    /// let mut query = world.try_query_filtered::<Entity, With<B>>().unwrap();
+    /// let mut query = world.try_query_state_filtered::<Entity, With<B>>().unwrap();
     /// let matching_entities = query.query(&world).into_iter().collect::<Vec<Entity>>();
     ///
     /// assert_eq!(matching_entities, vec![e2]);
@@ -1536,7 +1536,9 @@ impl World {
     /// Requires only an immutable world reference, but may fail if, for example,
     /// the components that make up this query have not been registered into the world.
     #[inline]
-    pub fn try_query_filtered<D: QueryData, F: QueryFilter>(&self) -> Option<QueryState<D, F>> {
+    pub fn try_query_state_filtered<D: QueryData, F: QueryFilter>(
+        &self,
+    ) -> Option<QueryState<D, F>> {
         QueryState::try_new(self)
     }
 
@@ -4290,10 +4292,24 @@ mod tests {
         let mut world = World::new();
         world.spawn(Foo);
         world.spawn((Foo, Disabled));
-        assert_eq!(1, world.query::<&Foo>().query(&world).into_iter().count());
+        assert_eq!(
+            1,
+            world
+                .query_state::<&Foo>()
+                .query(&world)
+                .into_iter()
+                .count()
+        );
 
         // If we explicitly remove the resource, no entities should be filtered anymore
         world.remove_resource::<DefaultQueryFilters>();
-        assert_eq!(2, world.query::<&Foo>().query(&world).into_iter().count());
+        assert_eq!(
+            2,
+            world
+                .query_state::<&Foo>()
+                .query(&world)
+                .into_iter()
+                .count()
+        );
     }
 }
