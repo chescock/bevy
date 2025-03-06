@@ -722,30 +722,9 @@ mod tests {
         let my_resource = my_resource.unwrap();
         assert_eq!(my_resource.foo, 123);
 
-        assert_eq!(
-            3,
-            dst_world
-                .query_state::<&Foo>()
-                .query(&dst_world)
-                .into_iter()
-                .count()
-        );
-        assert_eq!(
-            2,
-            dst_world
-                .query_state::<&Bar>()
-                .query(&dst_world)
-                .into_iter()
-                .count()
-        );
-        assert_eq!(
-            1,
-            dst_world
-                .query_state::<&Baz>()
-                .query(&dst_world)
-                .into_iter()
-                .count()
-        );
+        assert_eq!(3, dst_world.query_mut::<&Foo>().iter().count());
+        assert_eq!(2, dst_world.query_mut::<&Bar>().iter().count());
+        assert_eq!(1, dst_world.query_mut::<&Baz>().iter().count());
     }
 
     fn roundtrip_ron(world: &World) -> (DynamicScene, DynamicScene) {
@@ -783,22 +762,19 @@ mod tests {
         assert_scene_eq(&scene, &deserialized_scene);
 
         let bar_to_foo = dst_world
-            .query_state_filtered::<&MyEntityRef, Without<Foo>>()
-            .query(&dst_world)
-            .single_inner()
+            .query_filtered_mut::<&MyEntityRef, Without<Foo>>()
+            .single()
             .cloned()
             .unwrap();
         let foo = dst_world
-            .query_state_filtered::<Entity, With<Foo>>()
-            .query(&dst_world)
-            .single_inner()
+            .query_filtered_mut::<Entity, With<Foo>>()
+            .single()
             .unwrap();
 
         assert_eq!(foo, bar_to_foo.0);
         assert!(dst_world
-            .query_state_filtered::<&MyEntityRef, With<Foo>>()
-            .query(&dst_world)
-            .into_iter()
+            .query_filtered_mut::<&MyEntityRef, With<Foo>>()
+            .iter()
             .all(|r| world.get_entity(r.0).is_err()));
     }
 
@@ -817,14 +793,7 @@ mod tests {
         deserialized_scene
             .write_to_world(&mut world, &mut EntityHashMap::default())
             .unwrap();
-        assert_eq!(
-            &qux,
-            world
-                .query_state::<&Qux>()
-                .query(&world)
-                .single_inner()
-                .unwrap()
-        );
+        assert_eq!(&qux, world.query_mut::<&Qux>().single_inner().unwrap());
     }
 
     #[test]

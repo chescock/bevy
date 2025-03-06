@@ -2321,8 +2321,7 @@ mod tests {
         command_queue.apply(&mut world);
         assert_eq!(world.entities().len(), 1);
         let results = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
@@ -2335,8 +2334,7 @@ mod tests {
         }
         command_queue.apply(&mut world);
         let results2 = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
@@ -2356,8 +2354,7 @@ mod tests {
         }
         command_queue.apply(&mut world);
         let results3 = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
@@ -2384,8 +2381,7 @@ mod tests {
         command_queue1.apply(&mut world);
 
         let results = world
-            .query_state::<(&W<u8>, &W<u16>, &W<u32>)>()
-            .query(&world)
+            .query_mut::<(&W<u8>, &W<u16>, &W<u32>)>()
             .into_iter()
             .map(|(a, b, c)| (a.0, b.0, c.0))
             .collect::<Vec<_>>();
@@ -2419,8 +2415,7 @@ mod tests {
             .id();
         command_queue.apply(&mut world);
         let results_before = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
@@ -2439,15 +2434,13 @@ mod tests {
         assert_eq!(sparse_is_dropped.load(Ordering::Relaxed), 1);
 
         let results_after = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
         assert_eq!(results_after, vec![]);
         let results_after_u64 = world
-            .query_state::<&W<u64>>()
-            .query(&world)
+            .query_mut::<&W<u64>>()
             .into_iter()
             .map(|v| v.0)
             .collect::<Vec<_>>();
@@ -2468,8 +2461,7 @@ mod tests {
             .id();
         command_queue.apply(&mut world);
         let results_before = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
@@ -2495,15 +2487,13 @@ mod tests {
         assert_eq!(sparse_is_dropped.load(Ordering::Relaxed), 1);
 
         let results_after = world
-            .query_state::<(&W<u32>, &W<u64>)>()
-            .query(&world)
+            .query_mut::<(&W<u32>, &W<u64>)>()
             .into_iter()
             .map(|(a, b)| (a.0, b.0))
             .collect::<Vec<_>>();
         assert_eq!(results_after, vec![]);
         let results_after_u64 = world
-            .query_state::<&W<u64>>()
-            .query(&world)
+            .query_mut::<&W<u64>>()
             .into_iter()
             .map(|v| v.0)
             .collect::<Vec<_>>();

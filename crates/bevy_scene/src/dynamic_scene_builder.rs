@@ -256,7 +256,7 @@ impl<'w> DynamicSceneBuilder<'w> {
     /// # let mut world = World::default();
     /// # world.init_resource::<AppTypeRegistry>();
     /// # let _entity = world.spawn(MyComponent).id();
-    /// let mut query = world.query_state_filtered::<Entity, With<MyComponent>>();
+    /// let mut query = world.query_filtered::<Entity, With<MyComponent>>();
     ///
     /// let scene = DynamicSceneBuilder::from_world(&world)
     ///     .extract_entities(query.iter(&world))

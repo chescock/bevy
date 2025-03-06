@@ -2609,70 +2609,54 @@ mod tests {
             world.spawn(Sparse(i));
         }
 
-        let mut query = world.query_state::<Entity>();
+        let query = world.query_mut::<Entity>();
 
-        let sort = query
-            .query(&world)
-            .into_iter()
-            .sort::<Entity>()
-            .collect::<Vec<_>>();
+        let sort = query.iter().sort::<Entity>().collect::<Vec<_>>();
         assert_eq!(sort.len(), 300);
 
-        let sort_unstable = query
-            .query(&world)
-            .into_iter()
-            .sort_unstable::<Entity>()
-            .collect::<Vec<_>>();
+        let sort_unstable = query.iter().sort_unstable::<Entity>().collect::<Vec<_>>();
 
-        let sort_by = query
-            .query(&world)
-            .into_iter()
-            .sort_by::<Entity>(Ord::cmp)
-            .collect::<Vec<_>>();
+        let sort_by = query.iter().sort_by::<Entity>(Ord::cmp).collect::<Vec<_>>();
 
         let sort_unstable_by = query
-            .query(&world)
-            .into_iter()
+            .iter()
             .sort_unstable_by::<Entity>(Ord::cmp)
             .collect::<Vec<_>>();
 
         let sort_by_key = query
-            .query(&world)
-            .into_iter()
+            .iter()
             .sort_by_key::<Entity, _>(|&e| e)
             .collect::<Vec<_>>();
 
         let sort_unstable_by_key = query
-            .query(&world)
-            .into_iter()
+            .iter()
             .sort_unstable_by_key::<Entity, _>(|&e| e)
             .collect::<Vec<_>>();
 
         let sort_by_cached_key = query
-            .query(&world)
-            .into_iter()
+            .iter()
             .sort_by_cached_key::<Entity, _>(|&e| e)
             .collect::<Vec<_>>();
 
-        let mut sort_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_v2 = query.iter().collect::<Vec<_>>();
         sort_v2.sort();
 
-        let mut sort_unstable_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_unstable_v2 = query.iter().collect::<Vec<_>>();
         sort_unstable_v2.sort_unstable();
 
-        let mut sort_by_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_by_v2 = query.iter().collect::<Vec<_>>();
         sort_by_v2.sort_by(Ord::cmp);
 
-        let mut sort_unstable_by_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_unstable_by_v2 = query.iter().collect::<Vec<_>>();
         sort_unstable_by_v2.sort_unstable_by(Ord::cmp);
 
-        let mut sort_by_key_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_by_key_v2 = query.iter().collect::<Vec<_>>();
         sort_by_key_v2.sort_by_key(|&e| e);
 
-        let mut sort_unstable_by_key_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_unstable_by_key_v2 = query.iter().collect::<Vec<_>>();
         sort_unstable_by_key_v2.sort_unstable_by_key(|&e| e);
 
-        let mut sort_by_cached_key_v2 = query.query(&world).into_iter().collect::<Vec<_>>();
+        let mut sort_by_cached_key_v2 = query.iter().collect::<Vec<_>>();
         sort_by_cached_key_v2.sort_by_cached_key(|&e| e);
 
         assert_eq!(sort, sort_v2);
@@ -2693,8 +2677,8 @@ mod tests {
         world.spawn((A(2.22),));
 
         {
-            let mut query = world.query_state::<&A>();
-            let mut iter = query.query(&world).into_iter();
+            let query = world.query_mut::<&A>();
+            let mut iter = query.iter();
             println!(
                 "archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
                 iter.cursor.archetype_entities.len(),
@@ -2723,8 +2707,8 @@ mod tests {
         world.spawn((Sparse(33),));
 
         {
-            let mut query = world.query_state::<&Sparse>();
-            let mut iter = query.query(&world).into_iter();
+            let query = world.query_mut::<&Sparse>();
+            let mut iter = query.iter();
             println!(
                 "before_next_call: archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
                 iter.cursor.archetype_entities.len(),
@@ -2748,8 +2732,8 @@ mod tests {
     fn empty_query_iter_sort_after_next_does_not_panic() {
         let mut world = World::new();
         {
-            let mut query = world.query_state::<(&A, &Sparse)>();
-            let mut iter = query.query(&world).into_iter();
+            let query = world.query_mut::<(&A, &Sparse)>();
+            let mut iter = query.iter();
             println!(
                 "before_next_call: archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
                 iter.cursor.archetype_entities.len(),
@@ -2776,8 +2760,8 @@ mod tests {
         world.spawn((A(1.1), Sparse(22)));
         world.spawn((A(2.22), Sparse(33)));
         {
-            let mut query = world.query_state::<(&A, &Sparse)>();
-            let mut iter = query.query(&world).into_iter();
+            let query = world.query_mut::<(&A, &Sparse)>();
+            let mut iter = query.iter();
             println!(
                 "before_next_call: archetype_entities: {} table_entities: {} current_len: {} current_row: {}",
                 iter.cursor.archetype_entities.len(),
@@ -2811,90 +2795,62 @@ mod tests {
             .spawn_batch([A(0.), A(1.), A(2.), A(3.), A(4.)])
             .collect();
 
-        let mut query = world.query_state::<Entity>();
+        let query = world.query_mut::<Entity>();
 
         let sort = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort::<Entity>()
             .collect::<Vec<_>>();
 
         let sort_unstable = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort_unstable::<Entity>()
             .collect::<Vec<_>>();
 
         let sort_by = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort_by::<Entity>(Ord::cmp)
             .collect::<Vec<_>>();
 
         let sort_unstable_by = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort_unstable_by::<Entity>(Ord::cmp)
             .collect::<Vec<_>>();
 
         let sort_by_key = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort_by_key::<Entity, _>(|&e| e)
             .collect::<Vec<_>>();
 
         let sort_unstable_by_key = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort_unstable_by_key::<Entity, _>(|&e| e)
             .collect::<Vec<_>>();
 
         let sort_by_cached_key = query
-            .query(&world)
-            .iter_many_inner(entity_list)
+            .iter_many(entity_list)
             .sort_by_cached_key::<Entity, _>(|&e| e)
             .collect::<Vec<_>>();
 
-        let mut sort_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_v2.sort();
 
-        let mut sort_unstable_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_unstable_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_unstable_v2.sort_unstable();
 
-        let mut sort_by_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_by_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_by_v2.sort_by(Ord::cmp);
 
-        let mut sort_unstable_by_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_unstable_by_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_unstable_by_v2.sort_unstable_by(Ord::cmp);
 
-        let mut sort_by_key_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_by_key_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_by_key_v2.sort_by_key(|&e| e);
 
-        let mut sort_unstable_by_key_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_unstable_by_key_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_unstable_by_key_v2.sort_unstable_by_key(|&e| e);
 
-        let mut sort_by_cached_key_v2 = query
-            .query(&world)
-            .iter_many_inner(entity_list)
-            .collect::<Vec<_>>();
+        let mut sort_by_cached_key_v2 = query.iter_many(entity_list).collect::<Vec<_>>();
         sort_by_cached_key_v2.sort_by_cached_key(|&e| e);
 
         assert_eq!(sort, sort_v2);
@@ -2914,15 +2870,15 @@ mod tests {
             .spawn_batch([A(0.), A(1.), A(2.), A(3.), A(4.)])
             .collect();
 
-        let mut query = world.query_state::<Entity>();
-        let mut iter = query.query(&world).iter_many_inner(entity_list);
+        let query = world.query_mut::<Entity>();
+        let mut iter = query.iter_many(entity_list);
 
         _ = iter.next();
 
         iter.sort::<Entity>();
 
-        let mut query_2 = world.query_state::<&mut A>();
-        let mut iter_2 = query_2.query_mut(&mut world).iter_many_inner(entity_list);
+        let mut query_2 = world.query_mut::<&mut A>();
+        let mut iter_2 = query_2.iter_many_mut(entity_list);
 
         _ = iter_2.fetch_next();
 
@@ -2938,54 +2894,41 @@ mod tests {
 
         let mut world = World::new();
         let id = world.spawn(C(10)).id();
-        let mut query_state = world.query_state::<&mut C>();
+        let query = world.query_mut::<&mut C>();
 
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
-                .sort::<&C>();
+            let mut query = query.iter_many([id, id]).sort::<&C>();
             while query.fetch_next().is_some() {}
         }
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
-                .sort_unstable::<&C>();
+            let mut query = query.iter_many([id, id]).sort_unstable::<&C>();
             while query.fetch_next().is_some() {}
         }
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
+            let mut query = query
+                .iter_many([id, id])
                 .sort_by::<&C>(|l, r| Ord::cmp(l, r));
             while query.fetch_next().is_some() {}
         }
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
+            let mut query = query
+                .iter_many([id, id])
                 .sort_unstable_by::<&C>(|l, r| Ord::cmp(l, r));
             while query.fetch_next().is_some() {}
         }
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
-                .sort_by_key::<&C, _>(|d| d.0);
+            let mut query = query.iter_many([id, id]).sort_by_key::<&C, _>(|d| d.0);
             while query.fetch_next().is_some() {}
         }
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
+            let mut query = query
+                .iter_many([id, id])
                 .sort_unstable_by_key::<&C, _>(|d| d.0);
             while query.fetch_next().is_some() {}
         }
         {
-            let mut query = query_state
-                .query_mut(&mut world)
-                .iter_many_inner([id, id])
+            let mut query = query
+                .iter_many([id, id])
                 .sort_by_cached_key::<&C, _>(|d| d.0);
             while query.fetch_next().is_some() {}
         }

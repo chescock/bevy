@@ -830,8 +830,8 @@ mod test {
         // `Commands` delay
         app.update();
 
-        let mut state = app.world_mut().query_state::<&GlobalTransform>();
-        for global in state.query(app.world()) {
+        let state = app.world_mut().query_mut::<&GlobalTransform>();
+        for global in &state {
             assert_eq!(global, &GlobalTransform::from_translation(translation));
         }
     }

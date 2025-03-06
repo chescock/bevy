@@ -345,7 +345,7 @@ impl SpecializedRenderPipeline for TaaPipeline {
 }
 
 fn extract_taa_settings(mut commands: Commands, mut main_world: ResMut<MainWorld>) {
-    let mut cameras_3d = main_world.query_state_filtered::<(
+    let mut cameras_3d = main_world.query_filtered_mut::<(
         RenderEntity,
         &Camera,
         &Projection,
@@ -357,9 +357,7 @@ fn extract_taa_settings(mut commands: Commands, mut main_world: ResMut<MainWorld
         With<MotionVectorPrepass>,
     )>();
 
-    for (entity, camera, camera_projection, mut taa_settings) in
-        cameras_3d.query_mut(&mut main_world)
-    {
+    for (entity, camera, camera_projection, mut taa_settings) in &mut cameras_3d {
         let has_perspective_projection = matches!(camera_projection, Projection::Perspective(_));
         let mut entity_commands = commands
             .get_entity(entity)

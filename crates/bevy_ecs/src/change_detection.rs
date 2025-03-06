@@ -1556,8 +1556,8 @@ mod tests {
 
         // Since the world is always ahead, as long as changes can't get older than `u32::MAX` (which we ensure),
         // the wrapping difference will always be positive, so wraparound doesn't matter.
-        let mut query = world.query_state::<Ref<C>>();
-        assert!(query.query(&world).single_inner().unwrap().is_changed());
+        let query = world.query_mut::<Ref<C>>();
+        assert!(query.single().unwrap().is_changed());
     }
 
     #[test]

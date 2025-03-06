@@ -115,14 +115,15 @@ fn scene_load_check(
                         });
                 let scene = scenes.get_mut(gltf_scene_handle).unwrap();
 
-                let mut query = scene
+                let query = scene
                     .world
-                    .query_state::<(Option<&DirectionalLight>, Option<&PointLight>)>();
-                scene_handle.has_light = query.query(&scene.world).into_iter().any(
-                    |(maybe_directional_light, maybe_point_light)| {
-                        maybe_directional_light.is_some() || maybe_point_light.is_some()
-                    },
-                );
+                    .query_mut::<(Option<&DirectionalLight>, Option<&PointLight>)>();
+                scene_handle.has_light =
+                    query
+                        .iter()
+                        .any(|(maybe_directional_light, maybe_point_light)| {
+                            maybe_directional_light.is_some() || maybe_point_light.is_some()
+                        });
 
                 scene_handle.instance_id =
                     Some(scene_spawner.spawn(gltf_scene_handle.clone_weak()));

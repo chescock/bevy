@@ -70,8 +70,8 @@ fn single_mut_query(mut query: Query<&mut Foo>) {
 
         let readonly_foo = readonly_query.single();
 
-        let query_foo = query.single();
+        let query_mut = query.single();
 
-        println!("{readonly_foo:?}, {query_foo:?}");
+        println!("{readonly_foo:?}, {query_mut:?}");
     }
 }

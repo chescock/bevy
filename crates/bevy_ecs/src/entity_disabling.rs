@@ -24,14 +24,14 @@
 //! world.spawn((A,));
 //! world.spawn((A,));
 //!
-//! let mut normal_query = world.query_state::<&A>();
-//! assert_eq!(2, normal_query.query(&world).into_iter().count());
+//! let mut normal_query = world.query_mut::<&A>();
+//! assert_eq!(2, normal_query.iter().count());
 //!
-//! let mut prefab_query = world.query_state_filtered::<&A, With<Prefab>>();
-//! assert_eq!(1, prefab_query.query(&world).into_iter().count());
+//! let mut prefab_query = world.query_filtered_mut::<&A, With<Prefab>>();
+//! assert_eq!(1, prefab_query.iter().count());
 //!
-//! let mut maybe_prefab_query = world.query_state::<(&A, Has<Prefab>)>();
-//! assert_eq!(3, maybe_prefab_query.query(&world).into_iter().count());
+//! let mut maybe_prefab_query = world.query_mut::<(&A, Has<Prefab>)>();
+//! assert_eq!(3, maybe_prefab_query.iter().count());
 //! ```
 //!
 //! ## Default query filters
@@ -280,25 +280,25 @@ mod tests {
         world.spawn(CustomDisabled);
         world.spawn((Disabled, CustomDisabled));
 
-        let mut query = world.query_state::<()>();
-        assert_eq!(1, query.query(&world).into_iter().count());
+        let query = world.query_mut::<()>();
+        assert_eq!(1, query.iter().count());
 
-        let mut query = world.query_state_filtered::<(), With<Disabled>>();
-        assert_eq!(1, query.query(&world).into_iter().count());
+        let query = world.query_filtered_mut::<(), With<Disabled>>();
+        assert_eq!(1, query.iter().count());
 
-        let mut query = world.query_state::<Has<Disabled>>();
-        assert_eq!(2, query.query(&world).into_iter().count());
+        let query = world.query_mut::<Has<Disabled>>();
+        assert_eq!(2, query.iter().count());
 
-        let mut query = world.query_state_filtered::<(), With<CustomDisabled>>();
-        assert_eq!(1, query.query(&world).into_iter().count());
+        let query = world.query_filtered_mut::<(), With<CustomDisabled>>();
+        assert_eq!(1, query.iter().count());
 
-        let mut query = world.query_state::<Has<CustomDisabled>>();
-        assert_eq!(2, query.query(&world).into_iter().count());
+        let query = world.query_mut::<Has<CustomDisabled>>();
+        assert_eq!(2, query.iter().count());
 
-        let mut query = world.query_state_filtered::<(), (With<Disabled>, With<CustomDisabled>)>();
-        assert_eq!(1, query.query(&world).into_iter().count());
+        let query = world.query_filtered_mut::<(), (With<Disabled>, With<CustomDisabled>)>();
+        assert_eq!(1, query.iter().count());
 
-        let mut query = world.query_state::<(Has<Disabled>, Has<CustomDisabled>)>();
-        assert_eq!(4, query.query(&world).into_iter().count());
+        let query = world.query_mut::<(Has<Disabled>, Has<CustomDisabled>)>();
+        assert_eq!(4, query.iter().count());
     }
 }

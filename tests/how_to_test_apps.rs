@@ -76,11 +76,7 @@ fn test_player_spawn() {
     // Now that the startup systems have run, we can check if the player has
     // spawned as expected.
     let expected = Player::default();
-    let actual = app
-        .world_mut()
-        .query_state::<&Player>()
-        .query(app.world())
-        .single_inner();
+    let actual = app.world_mut().query_mut::<&Player>().single_inner();
     assert!(actual.is_ok(), "There should be exactly 1 player.");
     assert_eq!(
         expected.mana,
@@ -104,8 +100,7 @@ fn test_spell_casting() {
     let expected = Player::default();
     let actual = app
         .world_mut()
-        .query_state::<&Player>()
-        .query(app.world())
+        .query_mut::<&Player>()
         .single_inner()
         .unwrap();
     assert_eq!(
@@ -123,8 +118,7 @@ fn test_spell_casting() {
     // No extra spells have been cast, so no mana should have been used.
     let after_keypress_event = app
         .world_mut()
-        .query_state::<&Player>()
-        .query(app.world())
+        .query_mut::<&Player>()
         .single_inner()
         .unwrap();
     assert_eq!(
@@ -143,8 +137,7 @@ fn test_window_title() {
 
     let window = app
         .world_mut()
-        .query_state::<&Window>()
-        .query(app.world())
+        .query_mut::<&Window>()
         .single_inner()
         .unwrap();
     assert_eq!(window.title, "This is window 0!");

@@ -702,8 +702,8 @@ mod tests {
 
         let mut count = 0;
 
-        let mut q = world.query_state::<&Zst>();
-        for zst in q.query(&world) {
+        let q = world.query_mut::<&Zst>();
+        for zst in &q {
             // Ensure that the references returned are properly aligned.
             assert_eq!(
                 core::ptr::from_ref::<Zst>(zst) as usize % align_of::<Zst>(),

@@ -136,8 +136,8 @@ fn all_changed_detection_generic<T: Component<Mutability = Mutable> + Default + 
                 || {
                     let mut world = setup::<T>(entity_count);
                     world.clear_trackers();
-                    let mut query = world.query_state::<&mut T>();
-                    for mut component in query.query_mut(&mut world) {
+                    let mut query = world.query_mut::<&mut T>();
+                    for mut component in &mut query {
                         black_box(component.bench_modify());
                     }
                     let query = generic_filter_query::<Changed<T>>(&mut world);
@@ -186,9 +186,8 @@ fn few_changed_detection_generic<T: Component<Mutability = Mutable> + Default + 
                 || {
                     let mut world = setup::<T>(entity_count);
                     world.clear_trackers();
-                    let mut query = world.query_state::<&mut T>();
-                    let mut to_modify: Vec<bevy_ecs::prelude::Mut<T>> =
-                        query.query_mut(&mut world).into_iter().collect();
+                    let mut query = world.query_mut::<&mut T>();
+                    let mut to_modify: Vec<bevy_ecs::prelude::Mut<T>> = query.iter_mut().collect();
                     to_modify.shuffle(&mut deterministic_rand());
                     for component in to_modify[0..amount_to_modify].iter_mut() {
                         black_box(component.bench_modify());
@@ -319,7 +318,7 @@ fn multiple_archetype_none_changed_detection_generic<
                     let mut world = World::new();
                     add_archetypes_entities::<T>(&mut world, archetype_count, entity_count);
                     world.clear_trackers();
-                    let mut query = world.query_state::<(
+                    let mut query = world.query_mut::<(
                         Option<&mut Data<0>>,
                         Option<&mut Data<1>>,
                         Option<&mut Data<2>>,
@@ -336,7 +335,7 @@ fn multiple_archetype_none_changed_detection_generic<
                         Option<&mut Data<13>>,
                         Option<&mut Data<14>>,
                     )>();
-                    for components in query.query_mut(&mut world) {
+                    for components in &mut query {
                         // change Data<X> while keeping T unchanged
                         modify!(components;0,1,2,3,4,5,6,7,8,9,10,11,12,13,14);
                     }

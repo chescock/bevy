@@ -316,9 +316,8 @@ impl Plugin for RenderPlugin {
 
                     let primary_window = app
                         .world_mut()
-                        .query_state_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
-                        .query(app.world())
-                        .single_inner()
+                        .query_filtered_mut::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
+                        .single()
                         .ok()
                         .cloned();
                     let settings = render_creation.clone();

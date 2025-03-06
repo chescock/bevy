@@ -52,7 +52,7 @@ use crate::{
     resource::Resource,
     schedule::{Schedule, ScheduleLabel, Schedules},
     storage::{ResourceData, Storages},
-    system::Commands,
+    system::{Commands, QueryLens},
     world::{
         command_queue::RawCommandQueue,
         error::{
@@ -1543,7 +1543,7 @@ impl World {
     /// ]);
     ///
     /// fn get_positions(world: &World) -> Vec<(Entity, &Position)> {
-    ///     let mut query = world.try_query_state::<(Entity, &Position)>().unwrap();
+    ///     let mut query = world.try_query::<(Entity, &Position)>().unwrap();
     ///     query.query(world).into_iter().collect()
     /// }
     ///
@@ -1563,17 +1563,17 @@ impl World {
     ///
     /// let mut world = World::new();
     ///
-    /// let none_query = world.try_query_state::<&A>();
+    /// let none_query = world.try_query::<&A>();
     /// assert!(none_query.is_none());
     ///
     /// world.register_component::<A>();
     ///
-    /// let some_query = world.try_query_state::<&A>();
+    /// let some_query = world.try_query::<&A>();
     /// assert!(some_query.is_some());
     /// ```
     #[inline]
-    pub fn try_query_state<D: QueryData>(&self) -> Option<QueryState<D, ()>> {
-        self.try_query_state_filtered::<D, ()>()
+    pub fn try_query<D: QueryData>(&self) -> Option<QueryState<D, ()>> {
+        self.try_query_filtered::<D, ()>()
     }
 
     /// Returns [`QueryState`] for the given filtered [`QueryData`], which is used to efficiently
@@ -1590,7 +1590,7 @@ impl World {
     /// let e1 = world.spawn(A).id();
     /// let e2 = world.spawn((A, B)).id();
     ///
-    /// let mut query = world.try_query_state_filtered::<Entity, With<B>>().unwrap();
+    /// let mut query = world.try_query_filtered::<Entity, With<B>>().unwrap();
     /// let matching_entities = query.query(&world).into_iter().collect::<Vec<Entity>>();
     ///
     /// assert_eq!(matching_entities, vec![e2]);
@@ -1599,9 +1599,7 @@ impl World {
     /// Requires only an immutable world reference, but may fail if, for example,
     /// the components that make up this query have not been registered into the world.
     #[inline]
-    pub fn try_query_state_filtered<D: QueryData, F: QueryFilter>(
-        &self,
-    ) -> Option<QueryState<D, F>> {
+    pub fn try_query_filtered<D: QueryData, F: QueryFilter>(&self) -> Option<QueryState<D, F>> {
         QueryState::try_new(self)
     }
 
@@ -4355,24 +4353,10 @@ mod tests {
         let mut world = World::new();
         world.spawn(Foo);
         world.spawn((Foo, Disabled));
-        assert_eq!(
-            1,
-            world
-                .query_state::<&Foo>()
-                .query(&world)
-                .into_iter()
-                .count()
-        );
+        assert_eq!(1, world.query_mut::<&Foo>().into_iter().count());
 
         // If we explicitly remove the resource, no entities should be filtered anymore
         world.remove_resource::<DefaultQueryFilters>();
-        assert_eq!(
-            2,
-            world
-                .query_state::<&Foo>()
-                .query(&world)
-                .into_iter()
-                .count()
-        );
+        assert_eq!(2, world.query_mut::<&Foo>().into_iter().count());
     }
 }

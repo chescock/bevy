@@ -272,9 +272,9 @@ mod tests {
         let e1 = world.spawn_empty().id();
         let name = Name::new("MyName");
         let e2 = world.spawn(name.clone()).id();
-        let mut query = world.query_state::<NameOrEntity>();
-        let d1 = query.query(&world).get_inner(e1).unwrap();
-        let d2 = query.query(&world).get_inner(e2).unwrap();
+        let query = world.query_mut::<NameOrEntity>();
+        let d1 = query.get(e1).unwrap();
+        let d2 = query.get(e2).unwrap();
         // NameOrEntity Display for entities without a Name should be {index}v{generation}
         assert_eq!(d1.to_string(), "0v1");
         // NameOrEntity Display for entities with a Name should be the Name
