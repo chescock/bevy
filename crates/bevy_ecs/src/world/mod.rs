@@ -1462,6 +1462,69 @@ impl World {
         QueryState::new(self)
     }
 
+    /// Creates a [`Query`](crate::system::Query) with a newly-created owned [`QueryState`].
+    /// This can be used to easily perform one-time queries on a [`World`].
+    ///
+    /// If you need to perform the same query multiple times,
+    /// consider calling [`World::query_state`] and caching the state,
+    /// then using [`QueryState::query_mut`] to query using the saved state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bevy_ecs::prelude::*;
+    /// #
+    /// #[derive(Component)]
+    /// struct A;
+    ///
+    /// let mut world = World::new();
+    /// world.spawn(A);
+    ///
+    /// let mut query = world.query_mut::<&mut A>();
+    /// let a: Mut<A> = query.single_mut().unwrap();
+    /// ```
+    ///
+    /// # See also
+    /// - [`Self::query_filtered_mut`] to create a query with a [`QueryFilter`]
+    pub fn query_mut<D: QueryData>(&mut self) -> QueryLens<D> {
+        self.query_filtered_mut::<D, ()>()
+    }
+
+    /// Creates a [`Query`](crate::system::Query) with a newly-created owned [`QueryState`].
+    /// This can be used to easily perform one-time queries on a [`World`].
+    ///
+    /// If you need to perform the same query multiple times,
+    /// consider calling [`World::query_state_filtered`] and caching the state,
+    /// then using [`QueryState::query_mut`] to query using the saved state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bevy_ecs::prelude::*;
+    /// #
+    /// #[derive(Component)]
+    /// struct A;
+    /// #[derive(Component)]
+    /// struct B;
+    ///
+    /// let mut world = World::new();
+    /// world.spawn(A);
+    /// world.spawn((A, B));
+    ///
+    /// let mut query = world.query_filtered_mut::<&mut A, With<B>>();
+    /// let a: Mut<A> = query.single_mut().unwrap();
+    /// ```
+    ///
+    /// # See also
+    /// - [`Self::query_mut`] to create a query with no [`QueryFilter`]
+    pub fn query_filtered_mut<D: QueryData, F: QueryFilter>(&mut self) -> QueryLens<D, F> {
+        let state = self.query_state_filtered();
+        let last_run = self.last_change_tick();
+        let this_run = self.change_tick();
+        // SAFETY: TODO
+        unsafe { QueryLens::new(self.as_unsafe_world_cell(), state, last_run, this_run) }
+    }
+
     /// Returns [`QueryState`] for the given [`QueryData`], which is used to efficiently
     /// run queries on the [`World`] by storing and reusing the [`QueryState`].
     /// ```
