@@ -1375,7 +1375,7 @@ where
 
     /// An [`Iterator`] through the associated [`Entity`] for each [`PhaseItem`] in order.
     #[inline]
-    pub fn iter_entities(&'_ self) -> impl Iterator<Item = Entity> + '_ {
+    pub fn iter_all_entities(&'_ self) -> impl Iterator<Item = Entity> + '_ {
         self.items.iter().map(PhaseItem::entity)
     }
 
