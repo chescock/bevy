@@ -12,7 +12,7 @@ use crate::{
     resource::Resource,
     system::{Commands, Query},
     traversal::Traversal,
-    world::{error::EntityMutableFetchError, EntityDoesNotExistError, EntityMut, WorldEntityFetch},
+    world::{error::EntityMutableFetchError, EntityDoesNotExistError, EntityMut},
 };
 
 use super::{unsafe_world_cell::UnsafeWorldCell, Mut, World, ON_INSERT, ON_REPLACE};
@@ -203,14 +203,14 @@ impl<'w> DeferredWorld<'w> {
     /// [`EntityHashMap<EntityMut>`]: crate::entity::hash_map::EntityHashMap
     /// [`Vec<EntityMut>`]: alloc::vec::Vec
     #[inline]
-    pub fn get_entity_mut<F: WorldEntityFetch>(
+    pub fn get_entity_mut(
         &mut self,
-        entities: F,
-    ) -> Result<F::DeferredMut<'_>, EntityMutableFetchError> {
+        entity: Entity,
+    ) -> Result<EntityMut<'_>, EntityMutableFetchError> {
         let cell = self.as_unsafe_world_cell();
-        // SAFETY: `&mut self` gives mutable access to the entire world,
-        // and prevents any other access to the world.
-        unsafe { entities.fetch_deferred_mut(cell) }
+        let ecell = cell.get_entity(entity)?;
+        // SAFETY: caller ensures that the world cell has mutable access to the entity.
+        Ok(unsafe { EntityMut::new(ecell) })
     }
 
     /// Returns [`EntityMut`]s that expose read and write operations for the
@@ -335,8 +335,8 @@ impl<'w> DeferredWorld<'w> {
     /// [`EntityHashMap<EntityMut>`]: crate::entity::hash_map::EntityHashMap
     /// [`Vec<EntityMut>`]: alloc::vec::Vec
     #[inline]
-    pub fn entity_mut<F: WorldEntityFetch>(&mut self, entities: F) -> F::DeferredMut<'_> {
-        self.get_entity_mut(entities).unwrap()
+    pub fn entity_mut(&mut self, entity: Entity) -> EntityMut<'_> {
+        self.get_entity_mut(entity).unwrap()
     }
 
     pub fn get_many_entities_mut<T: TrustedEntityBorrow, const N: usize>(

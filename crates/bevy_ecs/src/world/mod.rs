@@ -3,7 +3,6 @@
 pub(crate) mod command_queue;
 mod component_constants;
 mod deferred_world;
-mod entity_fetch;
 mod entity_ref;
 pub mod error;
 mod filtered_resource;
@@ -21,7 +20,6 @@ pub use crate::{
 pub use bevy_ecs_macros::FromWorld;
 pub use component_constants::*;
 pub use deferred_world::DeferredWorld;
-pub use entity_fetch::WorldEntityFetch;
 pub use entity_ref::{
     DynamicComponentFetch, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept, EntityWorldMut,
     Entry, FilteredEntityMut, FilteredEntityRef, OccupiedEntry, TryFromFilteredError, VacantEntry,
@@ -826,7 +824,7 @@ impl World {
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
     #[track_caller]
-    pub fn entity_mut<F: WorldEntityFetch>(&mut self, entities: F) -> F::Mut<'_> {
+    pub fn entity_mut(&mut self, entity: Entity) -> EntityWorldMut<'_> {
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -834,7 +832,7 @@ impl World {
             panic!("{e}");
         }
 
-        match self.get_entity_mut(entities) {
+        match self.get_entity_mut(entity) {
             Ok(fetched) => fetched,
             Err(e) => panic_on_err(e),
         }
@@ -951,14 +949,19 @@ impl World {
     ///
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
-    pub fn get_entity_mut<F: WorldEntityFetch>(
+    pub fn get_entity_mut(
         &mut self,
-        entities: F,
-    ) -> Result<F::Mut<'_>, EntityMutableFetchError> {
+        entity: Entity,
+    ) -> Result<EntityWorldMut<'_>, EntityMutableFetchError> {
         let cell = self.as_unsafe_world_cell();
-        // SAFETY: `&mut self` gives mutable access to the entire world,
-        // and prevents any other access to the world.
-        unsafe { entities.fetch_mut(cell) }
+        let location = cell
+            .entities()
+            .get(entity)
+            .ok_or(EntityDoesNotExistError::new(entity, cell.entities()))?;
+        // SAFETY: We have mutable access to the entire world
+        let world = unsafe { cell.world_mut() };
+        // SAFETY: location was fetched from the same world's `Entities`.
+        Ok(unsafe { EntityWorldMut::new(world, entity, location) })
     }
 
     pub fn get_many_entities_mut<T: TrustedEntityBorrow, const N: usize>(
