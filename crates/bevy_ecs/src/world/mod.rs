@@ -3662,7 +3662,6 @@ mod tests {
         borrow::ToOwned,
         string::{String, ToString},
         sync::Arc,
-        vec,
         vec::Vec,
     };
     use bevy_ecs_macros::Component;
@@ -4209,14 +4208,13 @@ mod tests {
         let e2 = world.spawn_empty().id();
 
         assert!(world.get_entity(e1).is_ok());
-        assert!(world.get_entity([e1, e2]).is_ok());
-        assert!(world
-            .get_entity(&[e1, e2] /* this is an array not a slice */)
-            .is_ok());
-        assert!(world.get_entity(&vec![e1, e2][..]).is_ok());
-        assert!(world
-            .get_entity(&EntityHashSet::from_iter([e1, e2]))
-            .is_ok());
+        assert!(world.get_many_entities([e1, e2]).is_ok());
+        assert_eq!(
+            world
+                .iter_entities(&EntityHashSet::from_iter([e1, e2]))
+                .count(),
+            2
+        );
 
         world.entity_mut(e1).despawn();
 
@@ -4226,28 +4224,17 @@ mod tests {
         );
         assert_eq!(
             Err(e1),
-            world.get_entity([e1, e2]).map(|_| {}).map_err(|e| e.entity)
-        );
-        assert_eq!(
-            Err(e1),
             world
-                .get_entity(&[e1, e2] /* this is an array not a slice */)
+                .get_many_entities([e1, e2])
                 .map(|_| {})
                 .map_err(|e| e.entity)
         );
         assert_eq!(
-            Err(e1),
             world
-                .get_entity(&vec![e1, e2][..])
-                .map(|_| {})
-                .map_err(|e| e.entity)
-        );
-        assert_eq!(
-            Err(e1),
-            world
-                .get_entity(&EntityHashSet::from_iter([e1, e2]))
-                .map(|_| {})
-                .map_err(|e| e.entity)
+                .iter_entities(&EntityHashSet::from_iter([e1, e2]))
+                .map(|e| e.id())
+                .collect::<EntityHashSet>(),
+            EntityHashSet::from_iter([e2])
         );
     }
 
@@ -4259,33 +4246,18 @@ mod tests {
         let e2 = world.spawn_empty().id();
 
         assert!(world.get_entity_mut(e1).is_ok());
-        assert!(world.get_entity_mut([e1, e2]).is_ok());
-        assert!(world
-            .get_entity_mut(&[e1, e2] /* this is an array not a slice */)
-            .is_ok());
-        assert!(world.get_entity_mut(&vec![e1, e2][..]).is_ok());
-        assert!(world
-            .get_entity_mut(&EntityHashSet::from_iter([e1, e2]))
-            .is_ok());
+        assert!(world.get_many_entities_mut([e1, e2]).is_ok());
+        assert_eq!(
+            world
+                .iter_entities_mut(&EntityHashSet::from_iter([e1, e2]))
+                .count(),
+            2
+        );
 
         assert_eq!(
             Err(EntityMutableFetchError::AliasedMutability(e1)),
-            world.get_entity_mut([e1, e2, e1]).map(|_| {})
+            world.get_many_entities_mut([e1, e2, e1]).map(|_| {})
         );
-        assert_eq!(
-            Err(EntityMutableFetchError::AliasedMutability(e1)),
-            world
-                .get_entity_mut(&[e1, e2, e1] /* this is an array not a slice */)
-                .map(|_| {})
-        );
-        assert_eq!(
-            Err(EntityMutableFetchError::AliasedMutability(e1)),
-            world.get_entity_mut(&vec![e1, e2, e1][..]).map(|_| {})
-        );
-        // Aliased mutability isn't allowed by HashSets
-        assert!(world
-            .get_entity_mut(&EntityHashSet::from_iter([e1, e2, e1]))
-            .is_ok());
 
         world.entity_mut(e1).despawn();
 
@@ -4294,22 +4266,15 @@ mod tests {
             Err(EntityMutableFetchError::EntityDoesNotExist(e)) if e.entity == e1
         ));
         assert!(matches!(
-            world.get_entity_mut([e1, e2]).map(|_| {}),
+            world.get_many_entities_mut([e1, e2]).map(|_| {}),
             Err(EntityMutableFetchError::EntityDoesNotExist(e)) if e.entity == e1));
-        assert!(matches!(
+        assert_eq!(
             world
-                .get_entity_mut(&[e1, e2] /* this is an array not a slice */)
-                .map(|_| {}),
-            Err(EntityMutableFetchError::EntityDoesNotExist(e)) if e.entity == e1));
-        assert!(matches!(
-            world.get_entity_mut(&vec![e1, e2][..]).map(|_| {}),
-            Err(EntityMutableFetchError::EntityDoesNotExist(e)) if e.entity == e1,
-        ));
-        assert!(matches!(
-            world
-                .get_entity_mut(&EntityHashSet::from_iter([e1, e2]))
-                .map(|_| {}),
-            Err(EntityMutableFetchError::EntityDoesNotExist(e)) if e.entity == e1));
+                .iter_entities_mut(&EntityHashSet::from_iter([e1, e2]))
+                .map(|e| e.id())
+                .collect::<EntityHashSet>(),
+            EntityHashSet::from_iter([e2])
+        );
     }
 
     #[test]
