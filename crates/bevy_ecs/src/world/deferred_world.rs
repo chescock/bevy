@@ -4,7 +4,7 @@ use crate::{
     archetype::Archetype,
     change_detection::{MaybeLocation, MutUntyped},
     component::{ComponentId, HookContext, Mutable},
-    entity::Entity,
+    entity::{Entity, EntitySet, EntitySetIterator, TrustedEntityBorrow, UniqueEntityArray},
     event::{Event, EventId, Events, SendBatchIds},
     observer::{Observers, TriggerTargets},
     prelude::{Component, QueryState},
@@ -12,7 +12,7 @@ use crate::{
     resource::Resource,
     system::{Commands, Query},
     traversal::Traversal,
-    world::{error::EntityMutableFetchError, WorldEntityFetch},
+    world::{error::EntityMutableFetchError, EntityDoesNotExistError, EntityMut, WorldEntityFetch},
 };
 
 use super::{unsafe_world_cell::UnsafeWorldCell, Mut, World, ON_INSERT, ON_REPLACE};
@@ -337,6 +337,33 @@ impl<'w> DeferredWorld<'w> {
     #[inline]
     pub fn entity_mut<F: WorldEntityFetch>(&mut self, entities: F) -> F::DeferredMut<'_> {
         self.get_entity_mut(entities).unwrap()
+    }
+
+    pub fn get_many_entities_mut<T: TrustedEntityBorrow, const N: usize>(
+        &mut self,
+        entities: [T; N],
+    ) -> Result<UniqueEntityArray<EntityMut<'_>, N>, EntityMutableFetchError> {
+        // SAFETY: We have mutable access to the entire world
+        unsafe { self.as_unsafe_world_cell().get_many_entities_mut(entities) }
+    }
+
+    pub fn get_many_entities_unique_mut<T: TrustedEntityBorrow, const N: usize>(
+        &mut self,
+        entities: UniqueEntityArray<T, N>,
+    ) -> Result<UniqueEntityArray<EntityMut<'_>, N>, EntityDoesNotExistError> {
+        // SAFETY: We have mutable access to the entire world
+        unsafe {
+            self.as_unsafe_world_cell()
+                .get_many_entities_unique_mut(entities)
+        }
+    }
+
+    pub fn iter_entities_mut(
+        &mut self,
+        entities: impl EntitySet,
+    ) -> impl EntitySetIterator<Item = EntityMut<'_>> {
+        // SAFETY: We have mutable access to the entire world
+        unsafe { self.as_unsafe_world_cell().iter_entities_mut(entities) }
     }
 
     /// Returns [`Query`] for the given [`QueryState`], which is used to efficiently

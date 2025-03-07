@@ -42,7 +42,8 @@ use crate::{
         Components, Mutable, RequiredComponents, RequiredComponentsError, Tick,
     },
     entity::{
-        AllocAtWithoutReplacement, Entities, Entity, EntityDoesNotExistError, EntityLocation,
+        AllocAtWithoutReplacement, Entities, Entity, EntityBorrow, EntityDoesNotExistError,
+        EntityLocation, EntitySet, EntitySetIterator, TrustedEntityBorrow, UniqueEntityArray,
     },
     entity_disabling::DefaultQueryFilters,
     event::{Event, EventId, Events, SendBatchIds},
@@ -63,7 +64,7 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use bevy_platform_support::sync::atomic::{AtomicU32, Ordering};
 use bevy_ptr::{OwningPtr, Ptr, UnsafeCellDeref};
-use core::{any::TypeId, fmt};
+use core::{any::TypeId, fmt, mem::MaybeUninit};
 use log::warn;
 use unsafe_world_cell::{UnsafeEntityCell, UnsafeWorldCell};
 
@@ -689,7 +690,7 @@ impl World {
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
     #[track_caller]
-    pub fn entity<F: WorldEntityFetch>(&self, entities: F) -> F::Ref<'_> {
+    pub fn entity(&self, entity: Entity) -> EntityRef<'_> {
         #[inline(never)]
         #[cold]
         #[track_caller]
@@ -700,7 +701,7 @@ impl World {
             );
         }
 
-        match self.get_entity(entities) {
+        match self.get_entity(entity) {
             Ok(fetched) => fetched,
             Err(error) => panic_no_entity(self, error.entity),
         }
@@ -883,13 +884,39 @@ impl World {
     ///
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
-    pub fn get_entity<F: WorldEntityFetch>(
-        &self,
-        entities: F,
-    ) -> Result<F::Ref<'_>, EntityDoesNotExistError> {
+    pub fn get_entity(&self, entity: Entity) -> Result<EntityRef<'_>, EntityDoesNotExistError> {
         let cell = self.as_unsafe_world_cell_readonly();
+        let ecell = cell.get_entity(entity)?;
         // SAFETY: `&self` gives read access to the entire world, and prevents mutable access.
-        unsafe { entities.fetch_ref(cell) }
+        Ok(unsafe { EntityRef::new(ecell) })
+    }
+
+    pub fn get_many_entities<const N: usize>(
+        &self,
+        entities: [Entity; N],
+    ) -> Result<[EntityRef<'_>; N], EntityDoesNotExistError> {
+        let cell = self.as_unsafe_world_cell_readonly();
+
+        let mut refs = [MaybeUninit::uninit(); N];
+        for (r, id) in core::iter::zip(&mut refs, entities) {
+            let ecell = cell.get_entity(id)?;
+            // SAFETY: `&self` gives read access to the entire world, and prevents mutable access.
+            *r = MaybeUninit::new(unsafe { EntityRef::new(ecell) });
+        }
+
+        // SAFETY: Each item was initialized in the loop above.
+        let refs = refs.map(|r| unsafe { MaybeUninit::assume_init(r) });
+
+        Ok(refs)
+    }
+
+    pub fn iter_entities<I: IntoIterator<Item: EntityBorrow>>(
+        &self,
+        entities: I,
+    ) -> impl Iterator<Item = EntityRef<'_>> {
+        entities
+            .into_iter()
+            .filter_map(|e| self.get_entity(e.entity()).ok())
     }
 
     /// Returns [`EntityMut`]s that expose read and write operations for the
@@ -932,6 +959,33 @@ impl World {
         // SAFETY: `&mut self` gives mutable access to the entire world,
         // and prevents any other access to the world.
         unsafe { entities.fetch_mut(cell) }
+    }
+
+    pub fn get_many_entities_mut<T: TrustedEntityBorrow, const N: usize>(
+        &mut self,
+        entities: [T; N],
+    ) -> Result<UniqueEntityArray<EntityMut<'_>, N>, EntityMutableFetchError> {
+        // SAFETY: We have mutable access to the entire world
+        unsafe { self.as_unsafe_world_cell().get_many_entities_mut(entities) }
+    }
+
+    pub fn get_many_entities_unique_mut<T: TrustedEntityBorrow, const N: usize>(
+        &mut self,
+        entities: UniqueEntityArray<T, N>,
+    ) -> Result<UniqueEntityArray<EntityMut<'_>, N>, EntityDoesNotExistError> {
+        // SAFETY: We have mutable access to the entire world
+        unsafe {
+            self.as_unsafe_world_cell()
+                .get_many_entities_unique_mut(entities)
+        }
+    }
+
+    pub fn iter_entities_mut(
+        &mut self,
+        entities: impl EntitySet,
+    ) -> impl EntitySetIterator<Item = EntityMut<'_>> {
+        // SAFETY: We have mutable access to the entire world
+        unsafe { self.as_unsafe_world_cell().iter_entities_mut(entities) }
     }
 
     /// Returns an [`Entity`] iterator of current entities.
