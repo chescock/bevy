@@ -104,10 +104,10 @@ impl InvertibleSet {
 
     /// Disable `bit`
     pub fn remove(&mut self, bit: usize) {
-        if !self.inverted {
-            self.set.remove(bit);
-        } else if bit < self.set.len() {
+        if self.inverted {
             self.set.grow_and_insert(bit);
+        } else if bit < self.set.len() {
+            self.set.remove(bit);
         }
     }
 
