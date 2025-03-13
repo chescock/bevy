@@ -47,46 +47,6 @@ impl<'a, T: SparseSetIndex + Debug> Debug for FormattedBitSet<'a, T> {
     }
 }
 
-/// A wrapper struct to make Debug representations of [`FixedBitSet`] easier
-/// to read, when used to store [`SparseSetIndex`].
-///
-/// Instead of the raw integer representation of the `FixedBitSet`, the list of
-/// `T` valid for [`SparseSetIndex`] is shown.
-///
-/// Normal `FixedBitSet` `Debug` output:
-/// ```text
-/// read_and_writes: FixedBitSet { data: [ 160 ], length: 8 }
-/// ```
-///
-/// Which, unless you are a computer, doesn't help much understand what's in
-/// the set. With `FormattedBitSet`, we convert the present set entries into
-/// what they stand for, it is much clearer what is going on:
-/// ```text
-/// read_and_writes: [ ComponentId(5), ComponentId(7) ]
-/// ```
-struct FormattedInvertibleSet<'a, T: SparseSetIndex> {
-    bit_set: &'a InvertibleSet,
-    _marker: PhantomData<T>,
-}
-
-impl<'a, T: SparseSetIndex> FormattedInvertibleSet<'a, T> {
-    fn new(bit_set: &'a InvertibleSet) -> Self {
-        Self {
-            bit_set,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, T: SparseSetIndex + Debug> Debug for FormattedInvertibleSet<'a, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: debug invertible flag
-        f.debug_list()
-            .entries(self.bit_set.ones().map(T::get_sparse_set_index))
-            .finish()
-    }
-}
-
 /// A set of bits that is either a finite set, or the set complement of a finite set.
 #[derive(PartialEq, Eq)]
 struct InvertibleSet {
@@ -112,6 +72,15 @@ impl Clone for InvertibleSet {
     fn clone_from(&mut self, source: &Self) {
         self.set.clone_from(&source.set);
         self.inverted.clone_from(&source.inverted);
+    }
+}
+
+impl Debug for InvertibleSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InvertibleSet")
+            .field("inverted", &self.inverted)
+            .field("set", &FormattedBitSet::<usize>::new(&self.set))
+            .finish()
     }
 }
 
@@ -154,6 +123,12 @@ impl InvertibleSet {
         self.set.clear();
     }
 
+    /// Toggles all bits.
+    /// This will convert a finite set to an inverted set, and vice versa.
+    pub fn invert(&mut self) {
+        self.inverted = !self.inverted;
+    }
+
     /// Return `true` if the bit is enabled, `false` otherwise.
     pub fn contains(&self, bit: usize) -> bool {
         self.inverted ^ self.set.contains(bit)
@@ -166,9 +141,14 @@ impl InvertibleSet {
     }
 
     /// `true` if all bits are set.
-    /// Note that only an inverted set can be fully set, because all bits past the capacity are set.
+    /// Note that a finite set is never fully set, because all bits past the capacity are clear.
     pub fn is_all(&self) -> bool {
         self.inverted && self.set.is_clear()
+    }
+
+    /// Returns `true` if this is an inverted set, or `false` if it is a finite set.
+    pub fn inverted(&self) -> bool {
+        self.inverted
     }
 
     /// In-place union of two sets.
@@ -195,17 +175,44 @@ impl InvertibleSet {
     pub fn difference_with(&mut self, other: &Self) {
         // We can share the implementation of `union_with` with some algebra:
         // A - B = A & !B = !(!A | B)
-        self.inverted = !self.inverted;
+        self.invert();
         self.union_with(other);
-        self.inverted = !self.inverted;
+        self.invert();
+    }
+
+    /// In-place intersection of two sets.
+    ///
+    /// `self` will be updated by clearing any bit that is clear in `other`.
+    pub fn intersect_with(&mut self, other: &Self) {
+        match (self.inverted, other.inverted) {
+            (false, false) => self.set.intersect_with(&other.set),
+            (false, true) => self.set.difference_with(&other.set),
+            (true, false) => {
+                self.inverted = false;
+                // We have to grow here because the new bits are going to get flipped to 1.
+                self.set.grow(other.set.len());
+                self.set.toggle_range(..);
+                self.set.intersect_with(&other.set);
+            }
+            (true, true) => self.set.union_with(&other.set),
+        }
+    }
+
+    /// Returns the intersection of two sets.
+    ///
+    /// The resulting set will have bits enabled if they are enabled in both `self` and `other`.
+    pub fn intersection(&self, other: &Self) -> Self {
+        let mut result = self.clone();
+        result.intersect_with(other);
+        result
     }
 
     /// Returns `true` if `self` has no elements in common with `other`.
     /// This is equivalent to checking for an empty intersection.
     pub fn is_disjoint(&self, other: &Self) -> bool {
-        // Note that two sets are disjoint if one is a subset of the other's complement.
         match (self.inverted, other.inverted) {
             (false, false) => self.set.is_disjoint(&other.set),
+            // Two sets are disjoint if one is a subset of the other's complement.
             (false, true) => other.set.is_subset(&self.set),
             (true, false) => self.set.is_subset(&other.set),
             (true, true) => false,
@@ -214,13 +221,25 @@ impl InvertibleSet {
 
     /// Returns `true` if the set is a subset of another, i.e. `other` contains at least all the values in `self`.
     pub fn is_subset(&self, other: &Self) -> bool {
-        // Note that two sets are disjoint if one is a subset of the other's complement.
         match (self.inverted, other.inverted) {
             (false, false) => self.set.is_subset(&other.set),
             (false, true) => false,
+            // Two sets are disjoint if one is a subset of the other's complement.
             (true, false) => self.set.is_disjoint(&other.set),
             (true, true) => other.set.is_subset(&self.set),
         }
+    }
+
+    /// If this is a finite set, returns the set.
+    /// If this is an inverted set, returns `None`.
+    pub fn into_finite_set(self) -> Option<FixedBitSet> {
+        (!self.inverted).then(|| self.set)
+    }
+
+    /// If this is a finite set, returns the set.
+    /// If this is an inverted set, returns `None`.
+    pub fn as_finite_set(&self) -> Option<&FixedBitSet> {
+        (!self.inverted).then(|| &self.set)
     }
 }
 
@@ -282,14 +301,8 @@ impl<T: SparseSetIndex> Clone for Access<T> {
 impl<T: SparseSetIndex + Debug> Debug for Access<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Access")
-            .field(
-                "component_read_and_writes",
-                &FormattedInvertibleSet::<T>::new(&self.component_read_and_writes),
-            )
-            .field(
-                "component_writes",
-                &FormattedInvertibleSet::<T>::new(&self.component_writes),
-            )
+            .field("component_read_and_writes", &self.component_read_and_writes)
+            .field("component_writes", &self.component_writes)
             .field(
                 "resource_read_and_writes",
                 &FormattedBitSet::<T>::new(&self.resource_read_and_writes),
@@ -652,42 +665,19 @@ impl<T: SparseSetIndex> Access<T> {
     }
 
     fn get_component_conflicts(&self, other: &Access<T>) -> AccessConflicts {
-        let mut conflicts = FixedBitSet::new();
-
         // We have a conflict if we write and they read or write, or if they
         // write and we read or write.
-        for (
-            lhs_writes,
-            rhs_reads_and_writes,
-            lhs_writes_inverted,
-            rhs_reads_and_writes_inverted,
-        ) in [
-            (
-                &self.component_writes,
-                &other.component_read_and_writes,
-                self.component_writes_inverted,
-                other.component_read_and_writes_inverted,
-            ),
-            (
-                &other.component_writes,
-                &self.component_read_and_writes,
-                other.component_writes_inverted,
-                self.component_read_and_writes_inverted,
-            ),
-        ] {
-            // There's no way that I can see to do this without a temporary.
-            // Neither CNF nor DNF allows us to avoid one.
-            let temp_conflicts: FixedBitSet =
-                match (lhs_writes_inverted, rhs_reads_and_writes_inverted) {
-                    (true, true) => return AccessConflicts::All,
-                    (false, true) => lhs_writes.difference(rhs_reads_and_writes).collect(),
-                    (true, false) => rhs_reads_and_writes.difference(lhs_writes).collect(),
-                    (false, false) => lhs_writes.intersection(rhs_reads_and_writes).collect(),
-                };
-            conflicts.union_with(&temp_conflicts);
-        }
-
-        AccessConflicts::Individual(conflicts)
+        let mut conflicts = self
+            .component_writes
+            .intersection(&other.component_read_and_writes);
+        conflicts.union_with(
+            &other
+                .component_writes
+                .intersection(&self.component_read_and_writes),
+        );
+        conflicts
+            .into_finite_set()
+            .map_or(AccessConflicts::All, AccessConflicts::Individual)
     }
 
     /// Returns a vector of elements that the access and `other` cannot access at the same time.
@@ -792,16 +782,17 @@ impl<T: SparseSetIndex> Access<T> {
     pub fn try_iter_component_access(
         &self,
     ) -> Result<impl Iterator<Item = ComponentAccessKind<T>> + '_, UnboundedAccessError> {
-        // component_writes_inverted is only ever true when component_read_and_writes_inverted is
-        // also true. Therefore it is sufficient to check just component_read_and_writes_inverted.
-        if self.component_read_and_writes_inverted {
-            return Err(UnboundedAccessError {
-                writes_inverted: self.component_writes_inverted,
-                read_and_writes_inverted: self.component_read_and_writes_inverted,
-            });
-        }
+        // component_writes is only ever inverted when component_read_and_writes is also inverted.
+        // Therefore it is sufficient to check just component_read_and_writes.
+        let component_read_and_writes =
+            self.component_read_and_writes
+                .as_finite_set()
+                .ok_or(UnboundedAccessError {
+                    writes_inverted: self.component_writes.inverted(),
+                    read_and_writes_inverted: self.component_read_and_writes.inverted(),
+                })?;
 
-        let reads_and_writes = self.component_read_and_writes.ones().map(|index| {
+        let reads_and_writes = component_read_and_writes.ones().map(|index| {
             let sparse_index = T::get_sparse_set_index(index);
 
             if self.component_writes.contains(index) {
