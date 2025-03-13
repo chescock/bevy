@@ -483,11 +483,8 @@ impl SparseSetIndex for Entity {
 
 /// An [`Iterator`] returning a sequence of [`Entity`] values from
 pub struct ReserveEntitiesIterator<'a> {
-    // Metas, so we can recover the current generation for anything in the freelist.
-    meta: &'a [EntityMeta],
-
     // Reserved indices formerly in the freelist to hand out.
-    freelist_indices: core::slice::Iter<'a, u32>,
+    freelist_indices: core::slice::Iter<'a, Entity>,
 
     // New Entity indices to hand out, outside the range of meta.len().
     new_indices: core::ops::Range<u32>,
@@ -499,9 +496,7 @@ impl<'a> Iterator for ReserveEntitiesIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.freelist_indices
             .next()
-            .map(|&index| {
-                Entity::from_raw_and_generation(index, self.meta[index as usize].generation)
-            })
+            .copied()
             .or_else(|| self.new_indices.next().map(Entity::from_raw))
     }
 
@@ -569,7 +564,7 @@ pub struct Entities {
     /// [`reserve_entity`]: Entities::reserve_entity
     /// [`reserve_entities`]: Entities::reserve_entities
     /// [`flush`]: Entities::flush
-    pending: Vec<u32>,
+    pending: Vec<Entity>,
     free_cursor: AtomicIdCursor,
 }
 
@@ -632,7 +627,6 @@ impl Entities {
         };
 
         ReserveEntitiesIterator {
-            meta: &self.meta[..],
             freelist_indices: self.pending[freelist_range].iter(),
             new_indices: new_id_start..new_id_end,
         }
@@ -645,8 +639,7 @@ impl Entities {
         let n = self.free_cursor.fetch_sub(1, Ordering::Relaxed);
         if n > 0 {
             // Allocate from the freelist.
-            let index = self.pending[(n - 1) as usize];
-            Entity::from_raw_and_generation(index, self.meta[index as usize].generation)
+            self.pending[(n - 1) as usize]
         } else {
             // Grab a new ID, outside the range of `meta.len()`. `flush()` must
             // eventually be called to make it valid.
@@ -670,10 +663,10 @@ impl Entities {
     /// Allocate an entity ID directly.
     pub fn alloc(&mut self) -> Entity {
         self.verify_flushed();
-        if let Some(index) = self.pending.pop() {
+        if let Some(entity) = self.pending.pop() {
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
-            Entity::from_raw_and_generation(index, self.meta[index as usize].generation)
+            entity
         } else {
             let index = u32::try_from(self.meta.len()).expect("too many entities");
             self.meta.push(EntityMeta::EMPTY);
@@ -693,13 +686,17 @@ impl Entities {
 
         let loc = if entity.index() as usize >= self.meta.len() {
             self.pending
-                .extend((self.meta.len() as u32)..entity.index());
+                .extend(((self.meta.len() as u32)..entity.index()).map(Entity::from_raw));
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
             self.meta
                 .resize(entity.index() as usize + 1, EntityMeta::EMPTY);
             None
-        } else if let Some(index) = self.pending.iter().position(|item| *item == entity.index()) {
+        } else if let Some(index) = self
+            .pending
+            .iter()
+            .position(|item| item.index() == entity.index())
+        {
             self.pending.swap_remove(index);
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
@@ -734,13 +731,17 @@ impl Entities {
 
         let result = if entity.index() as usize >= self.meta.len() {
             self.pending
-                .extend((self.meta.len() as u32)..entity.index());
+                .extend(((self.meta.len() as u32)..entity.index()).map(Entity::from_raw));
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
             self.meta
                 .resize(entity.index() as usize + 1, EntityMeta::EMPTY);
             AllocAtWithoutReplacement::DidNotExist
-        } else if let Some(index) = self.pending.iter().position(|item| *item == entity.index()) {
+        } else if let Some(index) = self
+            .pending
+            .iter()
+            .position(|item| item.index() == entity.index())
+        {
             self.pending.swap_remove(index);
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
@@ -797,7 +798,10 @@ impl Entities {
 
         let loc = mem::replace(&mut meta.location, EntityMeta::EMPTY.location);
 
-        self.pending.push(entity.index());
+        self.pending.push(Entity::from_raw_and_generation(
+            entity.index,
+            meta.generation,
+        ));
 
         let new_free_cursor = self.pending.len() as IdCursor;
         *self.free_cursor.get_mut() = new_free_cursor;
@@ -925,12 +929,9 @@ impl Entities {
             0
         };
 
-        for index in self.pending.drain(new_free_cursor..) {
-            let meta = &mut self.meta[index as usize];
-            init(
-                Entity::from_raw_and_generation(index, meta.generation),
-                &mut meta.location,
-            );
+        for entity in self.pending.drain(new_free_cursor..) {
+            let meta = &mut self.meta[entity.index() as usize];
+            init(entity, &mut meta.location);
         }
     }
 
