@@ -331,6 +331,12 @@ impl<'w, 's> Commands<'w, 's> {
     /// - [`spawn_batch`](Self::spawn_batch) to spawn entities with a bundle each.
     pub fn spawn_empty(&mut self) -> EntityCommands {
         let entity = self.entities.reserve_entity();
+        let caller = MaybeLocation::caller();
+        self.queue(move |world: &mut World| -> crate::error::Result {
+            // SAFETY: Entity was just allocated
+            unsafe { world.spawn_at_empty_internal(entity, caller) };
+            Ok(())
+        });
         EntityCommands {
             entity,
             commands: self.reborrow(),

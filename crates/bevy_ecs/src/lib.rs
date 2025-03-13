@@ -131,7 +131,7 @@ pub mod __macro_exports {
 mod tests {
     use crate::{
         bundle::Bundle,
-        change_detection::Ref,
+        change_detection::{MaybeLocation, Ref},
         component::{Component, ComponentId, RequiredComponents, RequiredComponentsError},
         entity::Entity,
         entity_disabling::DefaultQueryFilters,
@@ -1192,6 +1192,8 @@ mod tests {
         let mut world = World::default();
         let e = world.entities().reserve_entity();
         world.flush_entities();
+        // SAFETY: Entity was just allocated
+        unsafe { world.spawn_at_empty_internal(e, MaybeLocation::caller()) };
         let mut e_mut = world.entity_mut(e);
         e_mut.insert(A(0));
         assert_eq!(e_mut.get::<A>().unwrap(), &A(0));

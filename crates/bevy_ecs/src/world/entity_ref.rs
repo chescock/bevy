@@ -2670,8 +2670,7 @@ impl<'w> EntityWorldMut<'w> {
     ) -> Entity {
         self.assert_not_despawned();
 
-        let entity_clone = self.world.entities.reserve_entity();
-        self.world.flush();
+        let entity_clone = self.world.spawn_empty().id();
 
         let mut builder = EntityCloner::build(self.world);
         config(&mut builder);

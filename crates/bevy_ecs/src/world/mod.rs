@@ -1192,7 +1192,7 @@ impl World {
 
     /// # Safety
     /// must be called on an entity that was just allocated
-    unsafe fn spawn_at_empty_internal(
+    pub(crate) unsafe fn spawn_at_empty_internal(
         &mut self,
         entity: Entity,
         caller: MaybeLocation,
@@ -2874,17 +2874,7 @@ impl World {
     /// This should be called before doing operations that might operate on queued entities,
     /// such as inserting a [`Component`].
     pub(crate) fn flush_entities(&mut self) {
-        let empty_archetype = self.archetypes.empty_mut();
-        let table = &mut self.storages.tables[empty_archetype.table_id()];
-        // PERF: consider pre-allocating space for flushed entities
-        // SAFETY: entity is set to a valid location
-        unsafe {
-            self.entities.flush(|entity, location| {
-                // SAFETY: no components are allocated by archetype.allocate() because the archetype
-                // is empty
-                *location = empty_archetype.allocate(entity, table.allocate(entity));
-            });
-        }
+        self.entities.flush();
     }
 
     /// Applies any commands in the world's internal [`CommandQueue`].

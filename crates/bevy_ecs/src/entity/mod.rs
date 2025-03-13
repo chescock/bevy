@@ -5,7 +5,6 @@
 //! **empty entity**: Entity with zero components.
 //! **pending entity**: Entity reserved, but not flushed yet (see [`Entities::flush`] docs for reference).
 //! **reserved entity**: same as **pending entity**.
-//! **invalid entity**: **pending entity** flushed with invalid (see [`Entities::flush_as_invalid`] docs for reference).
 //!
 //! See [`Entity`] to learn more.
 //!
@@ -898,52 +897,19 @@ impl Entities {
         *self.free_cursor.get_mut() != self.pending.len() as IdCursor
     }
 
-    /// Allocates space for entities previously reserved with [`reserve_entity`](Entities::reserve_entity) or
-    /// [`reserve_entities`](Entities::reserve_entities), then initializes each one using the supplied function.
-    ///
-    /// # Safety
-    /// Flush _must_ set the entity location to the correct [`ArchetypeId`] for the given [`Entity`]
-    /// each time init is called. This _can_ be [`ArchetypeId::INVALID`], provided the [`Entity`]
-    /// has not been assigned to an [`Archetype`][crate::archetype::Archetype].
-    ///
-    /// Note: freshly-allocated entities (ones which don't come from the pending list) are guaranteed
-    /// to be initialized with the invalid archetype.
-    pub unsafe fn flush(&mut self, mut init: impl FnMut(Entity, &mut EntityLocation)) {
+    /// Clears any pending entities from the free list.
+    pub fn flush(&mut self) {
         let free_cursor = self.free_cursor.get_mut();
         let current_free_cursor = *free_cursor;
 
-        let new_free_cursor = if current_free_cursor >= 0 {
-            current_free_cursor as usize
+        if current_free_cursor >= 0 {
+            self.pending.truncate(current_free_cursor as usize);
         } else {
             let old_meta_len = self.meta.len();
             let new_meta_len = old_meta_len + -current_free_cursor as usize;
             self.meta.resize(new_meta_len, EntityMeta::EMPTY);
-            for (index, meta) in self.meta.iter_mut().enumerate().skip(old_meta_len) {
-                init(
-                    Entity::from_raw_and_generation(index as u32, meta.generation),
-                    &mut meta.location,
-                );
-            }
-
             *free_cursor = 0;
-            0
-        };
-
-        for entity in self.pending.drain(new_free_cursor..) {
-            let meta = &mut self.meta[entity.index() as usize];
-            init(entity, &mut meta.location);
-        }
-    }
-
-    /// Flushes all reserved entities to an "invalid" state. Attempting to retrieve them will return `None`
-    /// unless they are later populated with a valid archetype.
-    pub fn flush_as_invalid(&mut self) {
-        // SAFETY: as per `flush` safety docs, the archetype id can be set to [`ArchetypeId::INVALID`] if
-        // the [`Entity`] has not been assigned to an [`Archetype`][crate::archetype::Archetype], which is the case here
-        unsafe {
-            self.flush(|_entity, location| {
-                location.archetype_id = ArchetypeId::INVALID;
-            });
+            self.pending.clear();
         }
     }
 
@@ -1120,7 +1086,7 @@ pub struct EntityLocation {
 }
 
 impl EntityLocation {
-    /// location for **pending entity** and **invalid entity**
+    /// location for **pending entity**
     pub(crate) const INVALID: EntityLocation = EntityLocation {
         archetype_id: ArchetypeId::INVALID,
         archetype_row: ArchetypeRow::INVALID,
@@ -1150,9 +1116,20 @@ mod tests {
     #[test]
     fn reserve_entity_len() {
         let mut e = Entities::new();
-        e.reserve_entity();
-        // SAFETY: entity_location is left invalid
-        unsafe { e.flush(|_, _| {}) };
+        let id = e.reserve_entity();
+        e.flush();
+        // SAFETY: We never hand off control to other code
+        unsafe {
+            e.set(
+                id.index(),
+                EntityLocation {
+                    archetype_id: ArchetypeId::new(0),
+                    archetype_row: ArchetypeRow::new(0),
+                    table_id: TableId::from_u32(0),
+                    table_row: TableRow::from_u32(0),
+                },
+            );
+        }
         assert_eq!(e.len(), 1);
     }
 
@@ -1162,13 +1139,7 @@ mod tests {
         let e = entities.reserve_entity();
         assert!(entities.contains(e));
         assert!(entities.get(e).is_none());
-
-        // SAFETY: entity_location is left invalid
-        unsafe {
-            entities.flush(|_entity, _location| {
-                // do nothing ... leaving entity location invalid
-            });
-        };
+        entities.flush();
 
         assert!(entities.contains(e));
         assert!(entities.get(e).is_none());
