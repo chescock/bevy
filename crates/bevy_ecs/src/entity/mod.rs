@@ -764,6 +764,21 @@ impl Entities {
     ///
     /// Must not be called while reserved entities are awaiting `flush()`.
     pub fn free(&mut self, entity: Entity) -> Option<EntityLocation> {
+        self.free_with_reserve_generations(entity, 1)
+    }
+
+    /// Destroy an entity, allowing it to be reused.
+    ///
+    /// Increments the `generation` of the freed [`Entity`]. The next entity ID allocated with this
+    /// `index` will count `generation` starting from the prior `generation` + the specified
+    /// value + 1.
+    ///
+    /// Must not be called while reserved entities are awaiting `flush()`.
+    pub fn free_with_reserve_generations(
+        &mut self,
+        entity: Entity,
+        generations: u32,
+    ) -> Option<EntityLocation> {
         self.verify_flushed();
 
         let meta = &mut self.meta[entity.index() as usize];
@@ -771,7 +786,7 @@ impl Entities {
             return None;
         }
 
-        meta.generation = IdentifierMask::inc_masked_high_by(meta.generation, 1);
+        meta.generation = IdentifierMask::inc_masked_high_by(meta.generation, generations + 1);
 
         if meta.generation == NonZero::<u32>::MIN {
             warn!(
@@ -853,25 +868,6 @@ impl Entities {
         // SAFETY: Caller guarantees that `index` a valid entity index
         let meta = unsafe { self.meta.get_unchecked_mut(index as usize) };
         meta.location = location;
-    }
-
-    /// Increments the `generation` of a freed [`Entity`]. The next entity ID allocated with this
-    /// `index` will count `generation` starting from the prior `generation` + the specified
-    /// value + 1.
-    ///
-    /// Does nothing if no entity with this `index` has been allocated yet.
-    pub(crate) fn reserve_generations(&mut self, index: u32, generations: u32) -> bool {
-        if (index as usize) >= self.meta.len() {
-            return false;
-        }
-
-        let meta = &mut self.meta[index as usize];
-        if meta.location.archetype_id == ArchetypeId::INVALID {
-            meta.generation = IdentifierMask::inc_masked_high_by(meta.generation, generations);
-            true
-        } else {
-            false
-        }
     }
 
     /// Get the [`Entity`] with a given id, if it exists in this [`Entities`] collection
@@ -1195,23 +1191,22 @@ mod tests {
     }
 
     #[test]
-    fn reserve_generations() {
+    fn free_with_reserve_generations() {
         let mut entities = Entities::new();
         let entity = entities.alloc();
-        entities.free(entity);
-
-        assert!(entities.reserve_generations(entity.index(), 1));
+        assert!(entities.free_with_reserve_generations(entity, 1).is_some());
     }
 
     #[test]
-    fn reserve_generations_and_alloc() {
+    fn free_with_reserve_generations_and_alloc() {
         const GENERATIONS: u32 = 10;
 
         let mut entities = Entities::new();
         let entity = entities.alloc();
-        entities.free(entity);
 
-        assert!(entities.reserve_generations(entity.index(), GENERATIONS));
+        assert!(entities
+            .free_with_reserve_generations(entity, GENERATIONS)
+            .is_some());
 
         // The very next entity allocated should be a further generation on the same index
         let next_entity = entities.alloc();
