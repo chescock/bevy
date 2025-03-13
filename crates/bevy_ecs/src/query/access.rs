@@ -213,8 +213,8 @@ impl InvertibleSet {
         match (self.inverted, other.inverted) {
             (false, false) => self.set.is_disjoint(&other.set),
             // Two sets are disjoint if one is a subset of the other's complement.
-            (false, true) => other.set.is_subset(&self.set),
-            (true, false) => self.set.is_subset(&other.set),
+            (false, true) => self.set.is_subset(&other.set),
+            (true, false) => other.set.is_subset(&self.set),
             (true, true) => false,
         }
     }
@@ -223,9 +223,9 @@ impl InvertibleSet {
     pub fn is_subset(&self, other: &Self) -> bool {
         match (self.inverted, other.inverted) {
             (false, false) => self.set.is_subset(&other.set),
-            (false, true) => false,
             // Two sets are disjoint if one is a subset of the other's complement.
-            (true, false) => self.set.is_disjoint(&other.set),
+            (false, true) => self.set.is_disjoint(&other.set),
+            (true, false) => false,
             (true, true) => other.set.is_subset(&self.set),
         }
     }
