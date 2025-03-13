@@ -48,7 +48,7 @@ impl<'a, T: SparseSetIndex + Debug> Debug for FormattedBitSet<'a, T> {
 }
 
 /// A set of bits that is either a finite set, or the set complement of a finite set.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Default)]
 struct InvertibleSet {
     /// If `inverted` is `false`, this is the set of bits that are included in the set.
     /// If `inverted` is `true`, this is the set of bits that are *not* included in the set.
@@ -233,13 +233,13 @@ impl InvertibleSet {
     /// If this is a finite set, returns the set.
     /// If this is an inverted set, returns `None`.
     pub fn into_finite_set(self) -> Option<FixedBitSet> {
-        (!self.inverted).then(|| self.set)
+        (!self.inverted).then_some(self.set)
     }
 
     /// If this is a finite set, returns the set.
     /// If this is an inverted set, returns `None`.
     pub fn as_finite_set(&self) -> Option<&FixedBitSet> {
-        (!self.inverted).then(|| &self.set)
+        (!self.inverted).then_some(&self.set)
     }
 }
 
