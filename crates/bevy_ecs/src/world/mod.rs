@@ -2696,13 +2696,6 @@ impl World {
             })
     }
 
-    /// Empties queued entities and adds them to the empty [`Archetype`](crate::archetype::Archetype).
-    /// This should be called before doing operations that might operate on queued entities,
-    /// such as inserting a [`Component`].
-    pub(crate) fn flush_entities(&mut self) {
-        self.entities.flush();
-    }
-
     /// Applies any commands in the world's internal [`CommandQueue`].
     /// This does not apply commands from any systems, only those stored in the world.
     ///
@@ -2735,7 +2728,6 @@ impl World {
     /// Queued entities will be spawned, and then commands will be applied.
     #[inline]
     pub fn flush(&mut self) {
-        self.flush_entities();
         self.flush_components();
         self.flush_commands();
     }
