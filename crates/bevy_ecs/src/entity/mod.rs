@@ -485,7 +485,7 @@ pub struct ReserveEntitiesIterator<'a> {
     // Reserved indices formerly in the freelist to hand out.
     freelist_indices: core::slice::Iter<'a, Entity>,
 
-    // New Entity indices to hand out, outside the range of meta.len().
+    // New Entity indices to hand out, outside the range of next_id_offset.
     new_indices: core::ops::Range<u32>,
 }
 
@@ -552,7 +552,7 @@ pub struct Entities {
     ///
     /// Once the freelist runs out, `free_cursor` starts going negative.
     /// The more negative it is, the more IDs have been reserved starting exactly at
-    /// the end of `meta.len()`.
+    /// `next_id_offset`.
     ///
     /// This formulation allows us to reserve any number of IDs first from the freelist
     /// and then from the new IDs, using only a single atomic subtract.
@@ -564,6 +564,7 @@ pub struct Entities {
     /// [`reserve_entities`]: Entities::reserve_entities
     /// [`flush`]: Entities::flush
     pending: Vec<Entity>,
+    next_id_offset: usize,
     free_cursor: AtomicIdCursor,
 }
 
@@ -572,6 +573,7 @@ impl Entities {
         Entities {
             meta: Vec::new(),
             pending: Vec::new(),
+            next_id_offset: 0,
             free_cursor: AtomicIdCursor::new(0),
         }
     }
@@ -613,9 +615,9 @@ impl Entities {
             // means we need to handle the negative range here.
             //
             // In this example, we truncate the end to 0, leaving us with `-3..0`.
-            // Then we negate these values to indicate how far beyond the end of `meta.end()`
-            // to go, yielding `meta.len()+0 .. meta.len()+3`.
-            let base = self.meta.len() as IdCursor;
+            // Then we negate these values to indicate how far beyond the end of `next_id_offset`
+            // to go, yielding `next_id_offset+0 .. next_id_offset+3`.
+            let base = self.next_id_offset as IdCursor;
 
             let new_id_end = u32::try_from(base - range_start).expect("too many entities");
 
@@ -640,13 +642,13 @@ impl Entities {
             // Allocate from the freelist.
             self.pending[(n - 1) as usize]
         } else {
-            // Grab a new ID, outside the range of `meta.len()`. `flush()` must
+            // Grab a new ID, outside the range of `next_id_offset`. `flush()` must
             // eventually be called to make it valid.
             //
             // As `self.free_cursor` goes more and more negative, we return IDs farther
-            // and farther beyond `meta.len()`.
+            // and farther beyond `next_id_offset`.
             Entity::from_raw(
-                u32::try_from(self.meta.len() as IdCursor - n).expect("too many entities"),
+                u32::try_from(self.next_id_offset as IdCursor - n).expect("too many entities"),
             )
         }
     }
@@ -667,8 +669,8 @@ impl Entities {
             *self.free_cursor.get_mut() = new_free_cursor;
             entity
         } else {
-            let index = u32::try_from(self.meta.len()).expect("too many entities");
-            self.meta.push(EntityMeta::EMPTY);
+            let index = u32::try_from(self.next_id_offset).expect("too many entities");
+            self.next_id_offset += 1;
             Entity::from_raw(index)
         }
     }
@@ -683,13 +685,12 @@ impl Entities {
     pub fn alloc_at(&mut self, entity: Entity) -> Option<EntityLocation> {
         self.verify_flushed();
 
-        let loc = if entity.index() as usize >= self.meta.len() {
+        let loc = if entity.index() as usize >= self.next_id_offset {
             self.pending
-                .extend(((self.meta.len() as u32)..entity.index()).map(Entity::from_raw));
+                .extend(((self.next_id_offset as u32)..entity.index()).map(Entity::from_raw));
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
-            self.meta
-                .resize(entity.index() as usize + 1, EntityMeta::EMPTY);
+            self.next_id_offset = entity.index() as usize + 1;
             None
         } else if let Some(index) = self
             .pending
@@ -707,6 +708,7 @@ impl Entities {
             ))
         };
 
+        self.grow_meta(entity.index());
         self.meta[entity.index() as usize].generation = entity.generation;
 
         loc
@@ -728,13 +730,12 @@ impl Entities {
     ) -> AllocAtWithoutReplacement {
         self.verify_flushed();
 
-        let result = if entity.index() as usize >= self.meta.len() {
+        let result = if entity.index() as usize >= self.next_id_offset {
             self.pending
-                .extend(((self.meta.len() as u32)..entity.index()).map(Entity::from_raw));
+                .extend(((self.next_id_offset as u32)..entity.index()).map(Entity::from_raw));
             let new_free_cursor = self.pending.len() as IdCursor;
             *self.free_cursor.get_mut() = new_free_cursor;
-            self.meta
-                .resize(entity.index() as usize + 1, EntityMeta::EMPTY);
+            self.next_id_offset = entity.index() as usize + 1;
             AllocAtWithoutReplacement::DidNotExist
         } else if let Some(index) = self
             .pending
@@ -756,6 +757,7 @@ impl Entities {
             }
         };
 
+        self.grow_meta(entity.index());
         self.meta[entity.index() as usize].generation = entity.generation;
         result
     }
@@ -781,6 +783,7 @@ impl Entities {
     ) -> Option<EntityLocation> {
         self.verify_flushed();
 
+        self.grow_meta(entity.index());
         let meta = &mut self.meta[entity.index() as usize];
         if meta.generation != entity.generation {
             return None;
@@ -839,6 +842,7 @@ impl Entities {
     /// Clears all [`Entity`] from the World.
     pub fn clear(&mut self) {
         self.meta.clear();
+        self.next_id_offset = 0;
         self.pending.clear();
         *self.free_cursor.get_mut() = 0;
     }
@@ -863,14 +867,21 @@ impl Entities {
     /// the entity around in storage.
     ///
     /// # Safety
-    ///  - `index` must be a valid entity index.
     ///  - `location` must be valid for the entity at `index` or immediately made valid afterwards
     ///    before handing control to unknown code.
     #[inline]
     pub(crate) unsafe fn set(&mut self, index: u32, location: EntityLocation) {
-        // SAFETY: Caller guarantees that `index` a valid entity index
+        self.grow_meta(index);
+        // SAFETY: We just resized `self.meta` to ensure `index` was in range
         let meta = unsafe { self.meta.get_unchecked_mut(index as usize) };
         meta.location = location;
+    }
+
+    /// Extends `meta` to ensure that `index` is valid.
+    fn grow_meta(&mut self, index: u32) {
+        if index as usize >= self.meta.len() {
+            self.meta.resize(index as usize + 1, EntityMeta::EMPTY);
+        }
     }
 
     /// Get the [`Entity`] with a given id, if it exists in this [`Entities`] collection
@@ -889,7 +900,7 @@ impl Entities {
             // If this entity was manually created, then free_cursor might be positive
             // Returning None handles that case correctly
             let num_pending = usize::try_from(-free_cursor).ok()?;
-            (idu < self.meta.len() + num_pending).then_some(Entity::from_raw(index))
+            (idu < self.next_id_offset + num_pending).then_some(Entity::from_raw(index))
         }
     }
 
@@ -905,9 +916,7 @@ impl Entities {
         if current_free_cursor >= 0 {
             self.pending.truncate(current_free_cursor as usize);
         } else {
-            let old_meta_len = self.meta.len();
-            let new_meta_len = old_meta_len + -current_free_cursor as usize;
-            self.meta.resize(new_meta_len, EntityMeta::EMPTY);
+            self.next_id_offset += -current_free_cursor as usize;
             *free_cursor = 0;
             self.pending.clear();
         }
@@ -922,7 +931,7 @@ impl Entities {
     /// [`World`]: crate::world::World
     #[inline]
     pub fn total_count(&self) -> usize {
-        self.meta.len()
+        self.next_id_offset
     }
 
     /// The count of all entities in the [`World`] that are used,
@@ -931,7 +940,7 @@ impl Entities {
     /// [`World`]: crate::world::World
     #[inline]
     pub fn used_count(&self) -> usize {
-        (self.meta.len() as isize - self.free_cursor.load(Ordering::Relaxed) as isize) as usize
+        (self.next_id_offset as isize - self.free_cursor.load(Ordering::Relaxed) as isize) as usize
     }
 
     /// The count of all entities in the [`World`] that have ever been allocated or reserved, including those that are freed.
@@ -940,14 +949,14 @@ impl Entities {
     /// [`World`]: crate::world::World
     #[inline]
     pub fn total_prospective_count(&self) -> usize {
-        self.meta.len() + (-self.free_cursor.load(Ordering::Relaxed)).min(0) as usize
+        self.next_id_offset + (-self.free_cursor.load(Ordering::Relaxed)).min(0) as usize
     }
 
     /// The count of currently allocated entities.
     #[inline]
     pub fn len(&self) -> u32 {
         // `pending`, by definition, can't be bigger than `meta`.
-        (self.meta.len() - self.pending.len()) as u32
+        (self.next_id_offset - self.pending.len()) as u32
     }
 
     /// Checks if any entity is currently active.

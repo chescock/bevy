@@ -1191,7 +1191,6 @@ mod tests {
     fn reserve_and_spawn() {
         let mut world = World::default();
         let e = world.entities().reserve_entity();
-        world.flush_entities();
         // SAFETY: Entity was just allocated
         unsafe { world.spawn_at_empty_internal(e, MaybeLocation::caller()) };
         let mut e_mut = world.entity_mut(e);
