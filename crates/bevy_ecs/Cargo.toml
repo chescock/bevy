@@ -72,6 +72,7 @@ async_executor = ["std", "bevy_tasks/async_executor"]
 ## on `no_std` targets, but provides access to certain additional features on
 ## supported platforms.
 std = [
+  "dep:thread_local",
   "bevy_reflect?/std",
   "bevy_tasks/std",
   "bevy_utils/std",
@@ -132,6 +133,8 @@ variadics_please = { version = "1.1", default-features = false }
 tracing = { version = "0.1", default-features = false, optional = true }
 log = { version = "0.4", default-features = false }
 bumpalo = "3"
+crossbeam-utils = { version = "0.8.11", default-features = false }
+thread_local = { version = "1", optional = true }
 
 [target.'cfg(not(all(target_has_atomic = "8", target_has_atomic = "16", target_has_atomic = "32", target_has_atomic = "64", target_has_atomic = "ptr")))'.dependencies]
 concurrent-queue = { version = "2.5.0", default-features = false, features = [
