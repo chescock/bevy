@@ -461,7 +461,7 @@ impl SparseSetIndex for Entity {
 
 /// An [`Iterator`] returning a sequence of [`Entity`] values from
 pub struct ReserveEntitiesIterator<'a> {
-    entities: &'a Entities,
+    allocator: &'a EntityAllocator,
     /// The number of entities remaining to reserve.
     count: u32,
     /// If we ran out of recycled indexes and reserved a block,
@@ -484,13 +484,12 @@ impl<'a> Iterator for ReserveEntitiesIterator<'a> {
             Some(index) => index - self.count,
             None => {
                 // Prefer recycling to reserving new ones
-                if let Ok(entity) = self.entities.recycled.pop() {
+                if let Some(entity) = self.allocator.reserve_recycled() {
                     return Some(entity);
                 }
                 // Otherwise, reserve enough indices for the remaining count
                 // Remember that we already decremented `count`, so we need one more
-                let next_entity_id = &self.entities.next_entity_id;
-                let first_index = next_entity_id.fetch_add(self.count + 1, Ordering::Relaxed);
+                let first_index = self.allocator.reserve_batch(self.count + 1);
                 self.last_index = Some(first_index + self.count);
                 first_index
             }
@@ -510,6 +509,64 @@ impl<'a> core::iter::FusedIterator for ReserveEntitiesIterator<'a> {}
 // SAFETY: Newly reserved entity values are unique.
 unsafe impl EntitySetIterator for ReserveEntitiesIterator<'_> {}
 
+/// Allocates generational [`Entity`] values and facilitates their reuse.
+#[derive(Debug)]
+pub struct EntityAllocator {
+    recycled: ConcurrentQueue<Entity>,
+    next_entity_id: AtomicU32,
+}
+
+impl Default for EntityAllocator {
+    fn default() -> Self {
+        Self {
+            recycled: ConcurrentQueue::unbounded(),
+            next_entity_id: AtomicU32::new(0),
+        }
+    }
+}
+
+impl EntityAllocator {
+    /// Creates a new [`EntityAllocator`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The count of all new [`Entity`] values that have been allocated.
+    /// This
+    pub fn total_count(&self) -> u32 {
+        self.next_entity_id.load(Ordering::Relaxed)
+    }
+
+    /// Reserves a new [`Entity`], either by reusing a recycled index (with an incremented generation), or by creating a new index
+    /// by incrementing the index counter.
+    pub fn reserve(&self) -> Entity {
+        self.reserve_recycled()
+            .unwrap_or_else(|| Entity::from_raw(self.reserve_batch(1)))
+    }
+
+    /// Reserves a new [`Entity`], by reusing a recycled index (with an incremented generation).
+    /// Returns `None` if there are no entities available to recycle.
+    pub fn reserve_recycled(&self) -> Option<Entity> {
+        self.recycled.pop().ok()
+    }
+
+    /// Reserves a batch of new entity indexes, and returns the first one.
+    pub fn reserve_batch(&self, count: u32) -> u32 {
+        self.next_entity_id.fetch_add(count, Ordering::Relaxed)
+    }
+
+    /// Queues the given `entity` for reuse. This should only be done if the `index` is no longer being used.
+    pub fn recycle(&self, entity: Entity) {
+        // We use an unbounded queue and never close it, so the push cannot fail.
+        self.recycled.push(entity).unwrap();
+    }
+
+    /// The number of [`Entity`] values that have been recycled but not claimed.
+    pub fn recycled_count(&self) -> usize {
+        self.recycled.len()
+    }
+}
+
 /// A [`World`]'s internal metadata store on all of its entities.
 ///
 /// Contains metadata on:
@@ -518,20 +575,18 @@ unsafe impl EntitySetIterator for ReserveEntitiesIterator<'_> {}
 ///  - The location of the entity's components in memory (via [`EntityLocation`])
 ///
 /// [`World`]: crate::world::World
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Entities {
     meta: Vec<EntityMeta>,
-    recycled: ConcurrentQueue<Entity>,
-    next_entity_id: AtomicU32,
+    /// The total number of live entities.
+    /// That is, those with `EntityMeta::location != INVALID`.
+    len: u32,
+    allocator: EntityAllocator,
 }
 
 impl Entities {
     pub(crate) fn new() -> Self {
-        Entities {
-            meta: Vec::new(),
-            recycled: ConcurrentQueue::unbounded(),
-            next_entity_id: AtomicU32::new(0),
-        }
+        Self::default()
     }
 
     /// Reserve entity IDs concurrently.
@@ -539,7 +594,7 @@ impl Entities {
     /// Storage for entity generation and location is lazily allocated by calling [`flush`](Entities::flush).
     pub fn reserve_entities(&self, count: u32) -> ReserveEntitiesIterator {
         ReserveEntitiesIterator {
-            entities: self,
+            allocator: &self.allocator,
             count,
             last_index: None,
         }
@@ -549,19 +604,12 @@ impl Entities {
     ///
     /// Equivalent to `self.reserve_entities(1).next().unwrap()`, but more efficient.
     pub fn reserve_entity(&self) -> Entity {
-        self.recycled.pop().unwrap_or_else(|_| {
-            Entity::from_raw(self.next_entity_id.fetch_add(1, Ordering::Relaxed))
-        })
+        self.allocator.reserve()
     }
 
     /// Allocate an entity ID directly.
     pub fn alloc(&mut self) -> Entity {
-        self.recycled.pop().unwrap_or_else(|_| {
-            let next_entity_id = self.next_entity_id.get_mut();
-            let index = *next_entity_id;
-            *next_entity_id += 1;
-            Entity::from_raw(index)
-        })
+        self.reserve_entity()
     }
 
     /// Destroy an entity, allowing it to be reused.
@@ -600,20 +648,20 @@ impl Entities {
 
         let loc = mem::replace(&mut meta.location, EntityMeta::EMPTY.location);
 
-        // We use an unbounded queue and never close it, so the push cannot fail.
-        self.recycled
-            .push(Entity::from_raw_and_generation(
-                entity.index,
-                meta.generation,
-            ))
-            .unwrap();
+        self.allocator.recycle(Entity::from_raw_and_generation(
+            entity.index,
+            meta.generation,
+        ));
+        if loc.archetype_id != ArchetypeId::INVALID {
+            self.len -= 1;
+        }
 
         Some(loc)
     }
 
     /// Ensure at least `n` allocations can succeed without reallocating.
     pub fn reserve(&mut self, additional: u32) {
-        let recycled_count = self.recycled.len();
+        let recycled_count = self.allocator.recycled_count();
         if additional as usize > recycled_count {
             self.meta.reserve(additional as usize - recycled_count);
         }
@@ -627,11 +675,18 @@ impl Entities {
             .is_some_and(|e| e.generation() == entity.generation())
     }
 
-    /// Clears all [`Entity`] from the World.
+    /// Clears all [`Entity`] metadata from the World.
     pub fn clear(&mut self) {
-        self.meta.clear();
-        self.recycled = ConcurrentQueue::unbounded();
-        *self.next_entity_id.get_mut() = 0;
+        // We can't simply `meta.clear()` because other code holding
+        // references to the entity allocator may have reserved indexes.
+        // Instead, we manually free each entity.
+        for index in 0..self.meta.len() {
+            let meta = &self.meta[index];
+            if meta.location.archetype_id != ArchetypeId::INVALID {
+                let entity = Entity::from_raw_and_generation(index as u32, meta.generation);
+                self.free(entity);
+            }
+        }
     }
 
     /// Returns the location of an [`Entity`].
@@ -661,6 +716,12 @@ impl Entities {
         self.grow_meta(index);
         // SAFETY: We just resized `self.meta` to ensure `index` was in range
         let meta = unsafe { self.meta.get_unchecked_mut(index as usize) };
+        if meta.location.archetype_id == ArchetypeId::INVALID {
+            self.len += 1;
+        }
+        if location.archetype_id == ArchetypeId::INVALID {
+            self.len -= 1;
+        }
         meta.location = location;
     }
 
@@ -681,8 +742,8 @@ impl Entities {
         if let Some(&EntityMeta { generation, .. }) = self.meta.get(index as usize) {
             Some(Entity::from_raw_and_generation(index, generation))
         } else {
-            let next_entity_id = self.next_entity_id.load(Ordering::Relaxed);
-            (index < next_entity_id).then_some(Entity::from_raw(index))
+            let total_count = self.allocator.total_count();
+            (index < total_count).then_some(Entity::from_raw(index))
         }
     }
 
@@ -695,19 +756,19 @@ impl Entities {
     /// [`World`]: crate::world::World
     #[inline]
     pub fn total_count(&self) -> u32 {
-        self.next_entity_id.load(Ordering::Relaxed)
+        self.allocator.total_count()
     }
 
     /// The count of currently allocated entities.
     #[inline]
     pub fn len(&self) -> u32 {
-        self.total_count() - self.recycled.len() as u32
+        self.len
     }
 
     /// Checks if any entity is currently active.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.len == 0
     }
 
     /// Sets the source code location from which this entity has last been spawned
