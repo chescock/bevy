@@ -74,16 +74,11 @@ use crate::{
     storage::{SparseSetIndex, TableId, TableRow},
 };
 use alloc::vec::Vec;
-use bevy_platform_support::sync::atomic::{AtomicU32, Ordering};
-use concurrent_queue::ConcurrentQueue;
+use bevy_platform_support::sync::Mutex;
 #[cfg(feature = "std")]
 use core::cell::{RefCell, RefMut};
 use core::{fmt, hash::Hash, mem, num::NonZero, panic::Location};
-#[cfg(feature = "std")]
-use crossbeam_utils::CachePadded;
 use log::warn;
-#[cfg(feature = "std")]
-use smallvec::SmallVec;
 #[cfg(feature = "std")]
 use thread_local::ThreadLocal;
 
@@ -472,10 +467,6 @@ pub struct ReserveEntitiesIterator<'a> {
     allocator: &'a EntityAllocator,
     /// The number of entities remaining to reserve.
     count: u32,
-    /// If we ran out of recycled indexes and reserved a block,
-    /// this stores the last reserved index.
-    /// Storing the last instead of first lets us calculate it from `count`.
-    last_index: Option<u32>,
 }
 
 impl<'a> Iterator for ReserveEntitiesIterator<'a> {
@@ -486,23 +477,7 @@ impl<'a> Iterator for ReserveEntitiesIterator<'a> {
             return None;
         }
         self.count -= 1;
-
-        let next_index = match self.last_index {
-            // Once we reserve new indexes, we have to keep using them
-            Some(index) => index - self.count,
-            None => {
-                // Prefer recycling to reserving new ones
-                if let Some(entity) = self.allocator.reserve_recycled() {
-                    return Some(entity);
-                }
-                // Otherwise, reserve enough indices for the remaining count
-                // Remember that we already decremented `count`, so we need one more
-                let first_index = self.allocator.reserve_batch(self.count + 1);
-                self.last_index = Some(first_index + self.count);
-                first_index
-            }
-        };
-        Some(Entity::from_raw(next_index))
+        Some(self.allocator.allocate())
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -517,43 +492,31 @@ impl<'a> core::iter::FusedIterator for ReserveEntitiesIterator<'a> {}
 // SAFETY: Newly reserved entity values are unique.
 unsafe impl EntitySetIterator for ReserveEntitiesIterator<'_> {}
 
-/// The size of a block of entities in the shared queue.
-/// This is one less than a round number because `ConcurrentQueue`
-/// stores a 64-bit 'stamp' next to each value.
+/// The minimum number of entities to have in the
+/// local queue after taking the lock on the entity pool.
 #[cfg(feature = "std")]
-const ENTITY_BLOCK: usize = 15;
+const ENTITY_BATCH: usize = 16;
 
-/// The number of entities in the local queue.
-///
-/// This is roughly twice the size of `ENTITY_BLOCK` so that we never need
-/// to use the shared queue for alternating `reserve` and `recycle` calls.
-///
-/// It is two less than a round number because we `SmallVec` stores one `usize`
-/// next to the value and `RefCell` stores another.
+/// The maximum number of entities to have in the
+/// local queue before pushing them to the entity pool.
+/// This should be larger than `ENTITY_BATCH` so that we
+/// have some remaining in the local queue if we perform
+/// an `allocate` immediate after a `recycle`.
 #[cfg(feature = "std")]
-const ENTITY_LOCAL_SIZE: usize = 30;
+const ENTITY_MAX_LOCAL_RECYCLES: usize = 32;
 
-/// Allocates generational [`Entity`] values and facilitates their reuse.
-#[derive(Debug)]
-pub struct EntityAllocator {
-    #[cfg(not(feature = "std"))]
-    recycled: ConcurrentQueue<Entity>,
-    #[cfg(feature = "std")]
-    recycled: ConcurrentQueue<[Entity; ENTITY_BLOCK]>,
-    #[cfg(feature = "std")]
-    local: ThreadLocal<CachePadded<RefCell<SmallVec<[Entity; ENTITY_LOCAL_SIZE]>>>>,
-    next_entity_id: AtomicU32,
+#[derive(Default, Debug)]
+struct EntityPool {
+    recycled: Vec<Entity>,
+    next_entity_id: u32,
 }
 
-impl Default for EntityAllocator {
-    fn default() -> Self {
-        Self {
-            recycled: ConcurrentQueue::unbounded(),
-            #[cfg(feature = "std")]
-            local: ThreadLocal::new(),
-            next_entity_id: AtomicU32::new(0),
-        }
-    }
+/// Allocates generational [`Entity`] values and facilitates their reuse.
+#[derive(Debug, Default)]
+pub struct EntityAllocator {
+    pool: Mutex<EntityPool>,
+    #[cfg(feature = "std")]
+    local: ThreadLocal<RefCell<Vec<Entity>>>,
 }
 
 impl EntityAllocator {
@@ -565,97 +528,89 @@ impl EntityAllocator {
     /// The count of all new [`Entity`] values that have been allocated.
     /// This
     pub fn total_count(&self) -> u32 {
-        self.next_entity_id.load(Ordering::Relaxed)
-    }
-
-    /// Reserves a new [`Entity`], either by reusing a recycled index (with an incremented generation), or by creating a new index
-    /// by incrementing the index counter.
-    pub fn reserve(&self) -> Entity {
-        self.reserve_recycled()
-            .unwrap_or_else(|| Entity::from_raw(self.reserve_batch(1)))
+        self.pool.lock().unwrap().next_entity_id
     }
 }
 
 #[cfg(feature = "std")]
 impl EntityAllocator {
     /// Obtains a mutable reference to the local queue.
-    fn local(&self) -> RefMut<SmallVec<[Entity; ENTITY_LOCAL_SIZE]>> {
+    fn local(&self) -> RefMut<Vec<Entity>> {
         self.local.get_or_default().borrow_mut()
     }
 
-    /// Reserves a new [`Entity`], by reusing a recycled index (with an incremented generation).
-    /// Returns `None` if there are no entities available to recycle.
-    pub fn reserve_recycled(&self) -> Option<Entity> {
+    /// Ensures that the next `count` allocations can be filled from the local queue.
+    pub fn reserve(&self, additional: u32) {
         let mut local = self.local();
-        // If the local queue is empty, try to refill it from the shared one before popping
-        if local.is_empty() {
-            if let Ok(block) = self.recycled.pop() {
-                local.extend_from_slice(&block);
-            }
+        let additional = (additional as usize).saturating_sub(local.len());
+        if additional > 0 {
+            // Make sure we always reserve at least ENTITY_BATCH whenever we take the lock.
+            self.reserve_inner(&mut local, additional.max(ENTITY_BATCH));
         }
-        local.pop()
     }
 
-    /// Reserves a batch of new entity indexes, and returns the first one.
-    pub fn reserve_batch(&self, count: u32) -> u32 {
-        // Reserve extra indexes to refill the local cache to a full block
-        // This avoids having to check the shared atomic on every reservation
+    /// Reserves a new [`Entity`], either by reusing a recycled index (with an incremented generation), or by creating a new index
+    /// by incrementing the index counter.
+    pub fn allocate(&self) -> Entity {
         let mut local = self.local();
-        let extra_for_refill = ENTITY_BLOCK.saturating_sub(local.len()) as u32;
-        let next = self
-            .next_entity_id
-            .fetch_add(count + extra_for_refill, Ordering::Relaxed);
-        // Refill the local cache from the indexes above `count`
-        // and reverse the order before extending local so that we
-        // return the indexes in increasing order.
-        local.extend(
-            ((next + count)..(next + count + extra_for_refill))
-                .rev()
-                .map(Entity::from_raw),
-        );
-        next
+        local.pop().unwrap_or_else(|| {
+            self.reserve_inner(&mut local, ENTITY_BATCH);
+            local.pop().unwrap()
+        })
+    }
+
+    /// Ensures that the next `additional` allocations can be filled from the local queue.
+    fn reserve_inner(&self, local: &mut Vec<Entity>, additional: usize) {
+        // Grow `local` before taking the lock
+        local.reserve(additional);
+        let mut pool = self.pool.lock().unwrap();
+        if additional > pool.recycled.len() {
+            let new_entity_count = (additional - pool.recycled.len()) as u32;
+            local.append(&mut pool.recycled);
+            let next = pool.next_entity_id;
+            pool.next_entity_id += new_entity_count;
+            // Release the lock before extending `pending` from newly-generated IDs
+            drop(pool);
+            local.extend((next..next + new_entity_count).rev().map(Entity::from_raw));
+        } else {
+            let remaining = pool.recycled.len() - additional;
+            local.copy_from_slice(&pool.recycled[remaining..]);
+            pool.recycled.truncate(remaining);
+        }
     }
 
     /// Queues the given `entity` for reuse. This should only be done if the `index` is no longer being used.
     pub fn recycle(&self, entity: Entity) {
         let mut local = self.local();
-        if local.len() == ENTITY_LOCAL_SIZE {
-            // The local size is equal to ENTITY_LOCAL_SIZE, which is larger than ENTITY_BLOCK, so `last_chunk` cannot fail
-            // We use an unbounded queue and never close it, so the push cannot fail.
-            self.recycled.push(*local.last_chunk().unwrap()).unwrap();
-            local.truncate(ENTITY_LOCAL_SIZE - ENTITY_BLOCK);
+        if local.len() >= ENTITY_MAX_LOCAL_RECYCLES {
+            let slice = &local[ENTITY_BATCH..];
+            self.pool.lock().unwrap().recycled.extend_from_slice(slice);
+            local.truncate(ENTITY_BATCH);
         }
         local.push(entity);
-    }
-
-    /// The number of [`Entity`] values that have been recycled but not claimed.
-    pub fn recycled_count(&self) -> usize {
-        self.recycled.len() * ENTITY_BLOCK
     }
 }
 
 #[cfg(not(feature = "std"))]
 impl EntityAllocator {
-    /// Reserves a new [`Entity`], by reusing a recycled index (with an incremented generation).
-    /// Returns `None` if there are no entities available to recycle.
-    pub fn reserve_recycled(&self) -> Option<Entity> {
-        self.recycled.pop().ok()
-    }
+    /// Ensures that the next `count` allocations can be filled from the local queue.
+    /// Since we do not have a local queue in no-std, this is a no-op.
+    pub fn reserve(&self, _additional: usize) {}
 
-    /// Reserves a batch of new entity indexes, and returns the first one.
-    pub fn reserve_batch(&self, count: u32) -> u32 {
-        self.next_entity_id.fetch_add(count, Ordering::Relaxed)
+    /// Reserves a new [`Entity`], either by reusing a recycled index (with an incremented generation), or by creating a new index
+    /// by incrementing the index counter.
+    pub fn allocate(&self) -> Entity {
+        let pool = self.pool.lock().unwrap();
+        pool.recycled.pop().unwrap_or_else(|| {
+            let next = pool.next_entity_id;
+            pool.next_entity_id += 1;
+            Entity::from_raw(next)
+        })
     }
 
     /// Queues the given `entity` for reuse. This should only be done if the `index` is no longer being used.
     pub fn recycle(&self, entity: Entity) {
-        // We use an unbounded queue and never close it, so the push cannot fail.
-        self.recycled.push(entity).unwrap();
-    }
-
-    /// The number of [`Entity`] values that have been recycled but not claimed.
-    pub fn recycled_count(&self) -> usize {
-        self.recycled.len()
+        self.pool.lock().unwrap().recycled.push(entity);
     }
 }
 
@@ -688,7 +643,6 @@ impl Entities {
         ReserveEntitiesIterator {
             allocator: &self.allocator,
             count,
-            last_index: None,
         }
     }
 
@@ -696,7 +650,7 @@ impl Entities {
     ///
     /// Equivalent to `self.reserve_entities(1).next().unwrap()`, but more efficient.
     pub fn reserve_entity(&self) -> Entity {
-        self.allocator.reserve()
+        self.allocator.allocate()
     }
 
     /// Allocate an entity ID directly.
@@ -753,10 +707,7 @@ impl Entities {
 
     /// Ensure at least `n` allocations can succeed without reallocating.
     pub fn reserve(&mut self, additional: u32) {
-        let recycled_count = self.allocator.recycled_count();
-        if additional as usize > recycled_count {
-            self.meta.reserve(additional as usize - recycled_count);
-        }
+        self.allocator.reserve(additional);
     }
 
     /// Returns true if the [`Entities`] contains [`entity`](Entity).
