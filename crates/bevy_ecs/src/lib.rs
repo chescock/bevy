@@ -131,7 +131,7 @@ pub mod __macro_exports {
 mod tests {
     use crate::{
         bundle::Bundle,
-        change_detection::Ref,
+        change_detection::{MaybeLocation, Ref},
         component::{Component, ComponentId, RequiredComponents, RequiredComponentsError},
         entity::Entity,
         entity_disabling::DefaultQueryFilters,
@@ -152,7 +152,6 @@ mod tests {
     use core::{
         any::TypeId,
         marker::PhantomData,
-        num::NonZero,
         sync::atomic::{AtomicUsize, Ordering},
     };
     use std::sync::Mutex;
@@ -1191,7 +1190,8 @@ mod tests {
     fn reserve_and_spawn() {
         let mut world = World::default();
         let e = world.entities().reserve_entity();
-        world.flush_entities();
+        // SAFETY: Entity was just allocated
+        unsafe { world.spawn_at_empty_internal(e, MaybeLocation::caller()) };
         let mut e_mut = world.entity_mut(e);
         e_mut.insert(A(0));
         assert_eq!(e_mut.get::<A>().unwrap(), &A(0));
@@ -1695,97 +1695,6 @@ mod tests {
         assert_eq!(0, query_min_size![(&A, &B), Changed<A>]);
         assert_eq!(0, query_min_size![&A, (Changed<A>, With<B>)]);
         assert_eq!(0, query_min_size![(&A, &B), Or<(Changed<A>, Changed<B>)>]);
-    }
-
-    #[test]
-    fn insert_or_spawn_batch() {
-        let mut world = World::default();
-        let e0 = world.spawn(A(0)).id();
-        let e1 = Entity::from_raw(1);
-
-        let values = vec![(e0, (B(0), C)), (e1, (B(1), C))];
-
-        #[expect(
-            deprecated,
-            reason = "This needs to be supported for now, and therefore still needs the test."
-        )]
-        world.insert_or_spawn_batch(values).unwrap();
-
-        assert_eq!(
-            world.get::<A>(e0),
-            Some(&A(0)),
-            "existing component was preserved"
-        );
-        assert_eq!(
-            world.get::<B>(e0),
-            Some(&B(0)),
-            "pre-existing entity received correct B component"
-        );
-        assert_eq!(
-            world.get::<B>(e1),
-            Some(&B(1)),
-            "new entity was spawned and received correct B component"
-        );
-        assert_eq!(
-            world.get::<C>(e0),
-            Some(&C),
-            "pre-existing entity received C component"
-        );
-        assert_eq!(
-            world.get::<C>(e1),
-            Some(&C),
-            "new entity was spawned and received C component"
-        );
-    }
-
-    #[test]
-    fn insert_or_spawn_batch_invalid() {
-        let mut world = World::default();
-        let e0 = world.spawn(A(0)).id();
-        let e1 = Entity::from_raw(1);
-        let e2 = world.spawn_empty().id();
-        let invalid_e2 =
-            Entity::from_raw_and_generation(e2.index(), NonZero::<u32>::new(2).unwrap());
-
-        let values = vec![(e0, (B(0), C)), (e1, (B(1), C)), (invalid_e2, (B(2), C))];
-
-        #[expect(
-            deprecated,
-            reason = "This needs to be supported for now, and therefore still needs the test."
-        )]
-        let result = world.insert_or_spawn_batch(values);
-
-        assert_eq!(
-            result,
-            Err(vec![invalid_e2]),
-            "e2 failed to be spawned or inserted into"
-        );
-
-        assert_eq!(
-            world.get::<A>(e0),
-            Some(&A(0)),
-            "existing component was preserved"
-        );
-        assert_eq!(
-            world.get::<B>(e0),
-            Some(&B(0)),
-            "pre-existing entity received correct B component"
-        );
-        assert_eq!(
-            world.get::<B>(e1),
-            Some(&B(1)),
-            "new entity was spawned and received correct B component"
-        );
-        assert_eq!(
-            world.get::<C>(e0),
-            Some(&C),
-            "pre-existing entity received C component"
-        );
-        assert_eq!(
-            world.get::<C>(e1),
-            Some(&C),
-            "new entity was spawned and received C component"
-        );
     }
 
     #[test]

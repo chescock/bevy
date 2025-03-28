@@ -304,7 +304,7 @@ pub trait RelationshipTarget: Component<Mutability = Mutable> + Sized {
 /// This will also queue up clones of the relationship sources if the [`EntityCloner`](crate::entity::EntityCloner) is configured
 /// to spawn recursively.
 pub fn clone_relationship_target<T: RelationshipTarget>(
-    _commands: &mut Commands,
+    commands: &mut Commands,
     source: &SourceComponent,
     context: &mut ComponentCloneCtx,
 ) {
@@ -314,7 +314,8 @@ pub fn clone_relationship_target<T: RelationshipTarget>(
             let collection = cloned.collection_mut_risky();
             for entity in component.iter() {
                 collection.add(entity);
-                context.queue_entity_clone(entity);
+                let target = commands.spawn_empty().id();
+                context.queue_entity_clone(entity, target);
             }
         }
         context.write_target_component(cloned);

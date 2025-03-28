@@ -5,7 +5,6 @@
 //! **empty entity**: Entity with zero components.
 //! **pending entity**: Entity reserved, but not flushed yet (see [`Entities::flush`] docs for reference).
 //! **reserved entity**: same as **pending entity**.
-//! **invalid entity**: **pending entity** flushed with invalid (see [`Entities::flush_as_invalid`] docs for reference).
 //!
 //! See [`Entity`] to learn more.
 //!
@@ -75,25 +74,21 @@ use crate::{
     storage::{SparseSetIndex, TableId, TableRow},
 };
 use alloc::vec::Vec;
-use bevy_platform_support::sync::atomic::Ordering;
+use bevy_platform_support::sync::atomic::{AtomicU32, Ordering};
+use concurrent_queue::ConcurrentQueue;
+#[cfg(feature = "std")]
+use core::cell::{RefCell, RefMut};
 use core::{fmt, hash::Hash, mem, num::NonZero, panic::Location};
+#[cfg(feature = "std")]
+use crossbeam_utils::CachePadded;
 use log::warn;
+#[cfg(feature = "std")]
+use smallvec::SmallVec;
+#[cfg(feature = "std")]
+use thread_local::ThreadLocal;
 
 #[cfg(feature = "serialize")]
 use serde::{Deserialize, Serialize};
-
-#[cfg(target_has_atomic = "64")]
-use bevy_platform_support::sync::atomic::AtomicI64 as AtomicIdCursor;
-#[cfg(target_has_atomic = "64")]
-type IdCursor = i64;
-
-/// Most modern platforms support 64-bit atomics, but some less-common platforms
-/// do not. This fallback allows compilation using a 32-bit cursor instead, with
-/// the caveat that some conversions may fail (and panic) at runtime.
-#[cfg(not(target_has_atomic = "64"))]
-use bevy_platform_support::sync::atomic::AtomicIsize as AtomicIdCursor;
-#[cfg(not(target_has_atomic = "64"))]
-type IdCursor = isize;
 
 /// Lightweight identifier of an [entity](crate::entity).
 ///
@@ -233,15 +228,6 @@ impl Hash for Entity {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.to_bits().hash(state);
     }
-}
-
-#[deprecated(
-    note = "This is exclusively used with the now deprecated `Entities::alloc_at_without_replacement`."
-)]
-pub(crate) enum AllocAtWithoutReplacement {
-    Exists(EntityLocation),
-    DidNotExist,
-    ExistsWithWrongGeneration,
 }
 
 impl Entity {
@@ -483,30 +469,44 @@ impl SparseSetIndex for Entity {
 
 /// An [`Iterator`] returning a sequence of [`Entity`] values from
 pub struct ReserveEntitiesIterator<'a> {
-    // Metas, so we can recover the current generation for anything in the freelist.
-    meta: &'a [EntityMeta],
-
-    // Reserved indices formerly in the freelist to hand out.
-    freelist_indices: core::slice::Iter<'a, u32>,
-
-    // New Entity indices to hand out, outside the range of meta.len().
-    new_indices: core::ops::Range<u32>,
+    allocator: &'a EntityAllocator,
+    /// The number of entities remaining to reserve.
+    count: u32,
+    /// If we ran out of recycled indexes and reserved a block,
+    /// this stores the last reserved index.
+    /// Storing the last instead of first lets us calculate it from `count`.
+    last_index: Option<u32>,
 }
 
 impl<'a> Iterator for ReserveEntitiesIterator<'a> {
     type Item = Entity;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.freelist_indices
-            .next()
-            .map(|&index| {
-                Entity::from_raw_and_generation(index, self.meta[index as usize].generation)
-            })
-            .or_else(|| self.new_indices.next().map(Entity::from_raw))
+        if self.count == 0 {
+            return None;
+        }
+        self.count -= 1;
+
+        let next_index = match self.last_index {
+            // Once we reserve new indexes, we have to keep using them
+            Some(index) => index - self.count,
+            None => {
+                // Prefer recycling to reserving new ones
+                if let Some(entity) = self.allocator.reserve_recycled() {
+                    return Some(entity);
+                }
+                // Otherwise, reserve enough indices for the remaining count
+                // Remember that we already decremented `count`, so we need one more
+                let first_index = self.allocator.reserve_batch(self.count + 1);
+                self.last_index = Some(first_index + self.count);
+                first_index
+            }
+        };
+        Some(Entity::from_raw(next_index))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.freelist_indices.len() + self.new_indices.len();
+        let len = self.count as usize;
         (len, Some(len))
     }
 }
@@ -517,6 +517,148 @@ impl<'a> core::iter::FusedIterator for ReserveEntitiesIterator<'a> {}
 // SAFETY: Newly reserved entity values are unique.
 unsafe impl EntitySetIterator for ReserveEntitiesIterator<'_> {}
 
+/// The size of a block of entities in the shared queue.
+/// This is one less than a round number because `ConcurrentQueue`
+/// stores a 64-bit 'stamp' next to each value.
+#[cfg(feature = "std")]
+const ENTITY_BLOCK: usize = 15;
+
+/// The number of entities in the local queue.
+///
+/// This is roughly twice the size of `ENTITY_BLOCK` so that we never need
+/// to use the shared queue for alternating `reserve` and `recycle` calls.
+///
+/// It is two less than a round number because we `SmallVec` stores one `usize`
+/// next to the value and `RefCell` stores another.
+#[cfg(feature = "std")]
+const ENTITY_LOCAL_SIZE: usize = 30;
+
+/// Allocates generational [`Entity`] values and facilitates their reuse.
+#[derive(Debug)]
+pub struct EntityAllocator {
+    #[cfg(not(feature = "std"))]
+    recycled: ConcurrentQueue<Entity>,
+    #[cfg(feature = "std")]
+    recycled: ConcurrentQueue<[Entity; ENTITY_BLOCK]>,
+    #[cfg(feature = "std")]
+    local: ThreadLocal<CachePadded<RefCell<SmallVec<[Entity; ENTITY_LOCAL_SIZE]>>>>,
+    next_entity_id: AtomicU32,
+}
+
+impl Default for EntityAllocator {
+    fn default() -> Self {
+        Self {
+            recycled: ConcurrentQueue::unbounded(),
+            #[cfg(feature = "std")]
+            local: ThreadLocal::new(),
+            next_entity_id: AtomicU32::new(0),
+        }
+    }
+}
+
+impl EntityAllocator {
+    /// Creates a new [`EntityAllocator`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The count of all new [`Entity`] values that have been allocated.
+    /// This
+    pub fn total_count(&self) -> u32 {
+        self.next_entity_id.load(Ordering::Relaxed)
+    }
+
+    /// Reserves a new [`Entity`], either by reusing a recycled index (with an incremented generation), or by creating a new index
+    /// by incrementing the index counter.
+    pub fn reserve(&self) -> Entity {
+        self.reserve_recycled()
+            .unwrap_or_else(|| Entity::from_raw(self.reserve_batch(1)))
+    }
+}
+
+#[cfg(feature = "std")]
+impl EntityAllocator {
+    /// Obtains a mutable reference to the local queue.
+    fn local(&self) -> RefMut<SmallVec<[Entity; ENTITY_LOCAL_SIZE]>> {
+        self.local.get_or_default().borrow_mut()
+    }
+
+    /// Reserves a new [`Entity`], by reusing a recycled index (with an incremented generation).
+    /// Returns `None` if there are no entities available to recycle.
+    pub fn reserve_recycled(&self) -> Option<Entity> {
+        let mut local = self.local();
+        // If the local queue is empty, try to refill it from the shared one before popping
+        if local.is_empty() {
+            if let Ok(block) = self.recycled.pop() {
+                local.extend_from_slice(&block);
+            }
+        }
+        local.pop()
+    }
+
+    /// Reserves a batch of new entity indexes, and returns the first one.
+    pub fn reserve_batch(&self, count: u32) -> u32 {
+        // Reserve extra indexes to refill the local cache to a full block
+        // This avoids having to check the shared atomic on every reservation
+        let mut local = self.local();
+        let extra_for_refill = ENTITY_BLOCK.saturating_sub(local.len()) as u32;
+        let next = self
+            .next_entity_id
+            .fetch_add(count + extra_for_refill, Ordering::Relaxed);
+        // Refill the local cache from the indexes above `count`
+        // and reverse the order before extending local so that we
+        // return the indexes in increasing order.
+        local.extend(
+            ((next + count)..(next + count + extra_for_refill))
+                .rev()
+                .map(Entity::from_raw),
+        );
+        next
+    }
+
+    /// Queues the given `entity` for reuse. This should only be done if the `index` is no longer being used.
+    pub fn recycle(&self, entity: Entity) {
+        let mut local = self.local();
+        if local.len() == ENTITY_LOCAL_SIZE {
+            // The local size is equal to ENTITY_LOCAL_SIZE, which is larger than ENTITY_BLOCK, so `last_chunk` cannot fail
+            // We use an unbounded queue and never close it, so the push cannot fail.
+            self.recycled.push(*local.last_chunk().unwrap()).unwrap();
+            local.truncate(ENTITY_LOCAL_SIZE - ENTITY_BLOCK);
+        }
+        local.push(entity);
+    }
+
+    /// The number of [`Entity`] values that have been recycled but not claimed.
+    pub fn recycled_count(&self) -> usize {
+        self.recycled.len() * ENTITY_BLOCK
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl EntityAllocator {
+    /// Reserves a new [`Entity`], by reusing a recycled index (with an incremented generation).
+    /// Returns `None` if there are no entities available to recycle.
+    pub fn reserve_recycled(&self) -> Option<Entity> {
+        self.recycled.pop().ok()
+    }
+
+    /// Reserves a batch of new entity indexes, and returns the first one.
+    pub fn reserve_batch(&self, count: u32) -> u32 {
+        self.next_entity_id.fetch_add(count, Ordering::Relaxed)
+    }
+
+    /// Queues the given `entity` for reuse. This should only be done if the `index` is no longer being used.
+    pub fn recycle(&self, entity: Entity) {
+        // We use an unbounded queue and never close it, so the push cannot fail.
+        self.recycled.push(entity).unwrap();
+    }
+
+    /// The number of [`Entity`] values that have been recycled but not claimed.
+    pub fn recycled_count(&self) -> usize {
+        self.recycled.len()
+    }
+}
+
 /// A [`World`]'s internal metadata store on all of its entities.
 ///
 /// Contains metadata on:
@@ -525,116 +667,28 @@ unsafe impl EntitySetIterator for ReserveEntitiesIterator<'_> {}
 ///  - The location of the entity's components in memory (via [`EntityLocation`])
 ///
 /// [`World`]: crate::world::World
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Entities {
     meta: Vec<EntityMeta>,
-
-    /// The `pending` and `free_cursor` fields describe three sets of Entity IDs
-    /// that have been freed or are in the process of being allocated:
-    ///
-    /// - The `freelist` IDs, previously freed by `free()`. These IDs are available to any of
-    ///   [`alloc`], [`reserve_entity`] or [`reserve_entities`]. Allocation will always prefer
-    ///   these over brand new IDs.
-    ///
-    /// - The `reserved` list of IDs that were once in the freelist, but got reserved by
-    ///   [`reserve_entities`] or [`reserve_entity`]. They are now waiting for [`flush`] to make them
-    ///   fully allocated.
-    ///
-    /// - The count of new IDs that do not yet exist in `self.meta`, but which we have handed out
-    ///   and reserved. [`flush`] will allocate room for them in `self.meta`.
-    ///
-    /// The contents of `pending` look like this:
-    ///
-    /// ```txt
-    /// ----------------------------
-    /// |  freelist  |  reserved   |
-    /// ----------------------------
-    ///              ^             ^
-    ///          free_cursor   pending.len()
-    /// ```
-    ///
-    /// As IDs are allocated, `free_cursor` is atomically decremented, moving
-    /// items from the freelist into the reserved list by sliding over the boundary.
-    ///
-    /// Once the freelist runs out, `free_cursor` starts going negative.
-    /// The more negative it is, the more IDs have been reserved starting exactly at
-    /// the end of `meta.len()`.
-    ///
-    /// This formulation allows us to reserve any number of IDs first from the freelist
-    /// and then from the new IDs, using only a single atomic subtract.
-    ///
-    /// Once [`flush`] is done, `free_cursor` will equal `pending.len()`.
-    ///
-    /// [`alloc`]: Entities::alloc
-    /// [`reserve_entity`]: Entities::reserve_entity
-    /// [`reserve_entities`]: Entities::reserve_entities
-    /// [`flush`]: Entities::flush
-    pending: Vec<u32>,
-    free_cursor: AtomicIdCursor,
+    /// The total number of live entities.
+    /// That is, those with `EntityMeta::location != INVALID`.
+    len: u32,
+    allocator: EntityAllocator,
 }
 
 impl Entities {
-    pub(crate) const fn new() -> Self {
-        Entities {
-            meta: Vec::new(),
-            pending: Vec::new(),
-            free_cursor: AtomicIdCursor::new(0),
-        }
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 
     /// Reserve entity IDs concurrently.
     ///
     /// Storage for entity generation and location is lazily allocated by calling [`flush`](Entities::flush).
-    #[expect(
-        clippy::allow_attributes,
-        reason = "`clippy::unnecessary_fallible_conversions` may not always lint."
-    )]
-    #[allow(
-        clippy::unnecessary_fallible_conversions,
-        reason = "`IdCursor::try_from` may fail on 32-bit platforms."
-    )]
     pub fn reserve_entities(&self, count: u32) -> ReserveEntitiesIterator {
-        // Use one atomic subtract to grab a range of new IDs. The range might be
-        // entirely nonnegative, meaning all IDs come from the freelist, or entirely
-        // negative, meaning they are all new IDs to allocate, or a mix of both.
-        let range_end = self.free_cursor.fetch_sub(
-            IdCursor::try_from(count)
-                .expect("64-bit atomic operations are not supported on this platform."),
-            Ordering::Relaxed,
-        );
-        let range_start = range_end
-            - IdCursor::try_from(count)
-                .expect("64-bit atomic operations are not supported on this platform.");
-
-        let freelist_range = range_start.max(0) as usize..range_end.max(0) as usize;
-
-        let (new_id_start, new_id_end) = if range_start >= 0 {
-            // We satisfied all requests from the freelist.
-            (0, 0)
-        } else {
-            // We need to allocate some new Entity IDs outside of the range of self.meta.
-            //
-            // `range_start` covers some negative territory, e.g. `-3..6`.
-            // Since the nonnegative values `0..6` are handled by the freelist, that
-            // means we need to handle the negative range here.
-            //
-            // In this example, we truncate the end to 0, leaving us with `-3..0`.
-            // Then we negate these values to indicate how far beyond the end of `meta.end()`
-            // to go, yielding `meta.len()+0 .. meta.len()+3`.
-            let base = self.meta.len() as IdCursor;
-
-            let new_id_end = u32::try_from(base - range_start).expect("too many entities");
-
-            // `new_id_end` is in range, so no need to check `start`.
-            let new_id_start = (base - range_end.min(0)) as u32;
-
-            (new_id_start, new_id_end)
-        };
-
         ReserveEntitiesIterator {
-            meta: &self.meta[..],
-            freelist_indices: self.pending[freelist_range].iter(),
-            new_indices: new_id_start..new_id_end,
+            allocator: &self.allocator,
+            count,
+            last_index: None,
         }
     }
 
@@ -642,136 +696,40 @@ impl Entities {
     ///
     /// Equivalent to `self.reserve_entities(1).next().unwrap()`, but more efficient.
     pub fn reserve_entity(&self) -> Entity {
-        let n = self.free_cursor.fetch_sub(1, Ordering::Relaxed);
-        if n > 0 {
-            // Allocate from the freelist.
-            let index = self.pending[(n - 1) as usize];
-            Entity::from_raw_and_generation(index, self.meta[index as usize].generation)
-        } else {
-            // Grab a new ID, outside the range of `meta.len()`. `flush()` must
-            // eventually be called to make it valid.
-            //
-            // As `self.free_cursor` goes more and more negative, we return IDs farther
-            // and farther beyond `meta.len()`.
-            Entity::from_raw(
-                u32::try_from(self.meta.len() as IdCursor - n).expect("too many entities"),
-            )
-        }
-    }
-
-    /// Check that we do not have pending work requiring `flush()` to be called.
-    fn verify_flushed(&mut self) {
-        debug_assert!(
-            !self.needs_flush(),
-            "flush() needs to be called before this operation is legal"
-        );
+        self.allocator.reserve()
     }
 
     /// Allocate an entity ID directly.
     pub fn alloc(&mut self) -> Entity {
-        self.verify_flushed();
-        if let Some(index) = self.pending.pop() {
-            let new_free_cursor = self.pending.len() as IdCursor;
-            *self.free_cursor.get_mut() = new_free_cursor;
-            Entity::from_raw_and_generation(index, self.meta[index as usize].generation)
-        } else {
-            let index = u32::try_from(self.meta.len()).expect("too many entities");
-            self.meta.push(EntityMeta::EMPTY);
-            Entity::from_raw(index)
-        }
-    }
-
-    /// Allocate a specific entity ID, overwriting its generation.
-    ///
-    /// Returns the location of the entity currently using the given ID, if any. Location should be
-    /// written immediately.
-    #[deprecated(
-        note = "This can cause extreme performance problems when used after freeing a large number of entities and requesting an arbitrary entity. See #18054 on GitHub."
-    )]
-    pub fn alloc_at(&mut self, entity: Entity) -> Option<EntityLocation> {
-        self.verify_flushed();
-
-        let loc = if entity.index() as usize >= self.meta.len() {
-            self.pending
-                .extend((self.meta.len() as u32)..entity.index());
-            let new_free_cursor = self.pending.len() as IdCursor;
-            *self.free_cursor.get_mut() = new_free_cursor;
-            self.meta
-                .resize(entity.index() as usize + 1, EntityMeta::EMPTY);
-            None
-        } else if let Some(index) = self.pending.iter().position(|item| *item == entity.index()) {
-            self.pending.swap_remove(index);
-            let new_free_cursor = self.pending.len() as IdCursor;
-            *self.free_cursor.get_mut() = new_free_cursor;
-            None
-        } else {
-            Some(mem::replace(
-                &mut self.meta[entity.index() as usize].location,
-                EntityMeta::EMPTY.location,
-            ))
-        };
-
-        self.meta[entity.index() as usize].generation = entity.generation;
-
-        loc
-    }
-
-    /// Allocate a specific entity ID, overwriting its generation.
-    ///
-    /// Returns the location of the entity currently using the given ID, if any.
-    #[deprecated(
-        note = "This can cause extreme performance problems when used after freeing a large number of entities and requesting an arbitrary entity. See #18054 on GitHub."
-    )]
-    #[expect(
-        deprecated,
-        reason = "We need to support `AllocAtWithoutReplacement` for now."
-    )]
-    pub(crate) fn alloc_at_without_replacement(
-        &mut self,
-        entity: Entity,
-    ) -> AllocAtWithoutReplacement {
-        self.verify_flushed();
-
-        let result = if entity.index() as usize >= self.meta.len() {
-            self.pending
-                .extend((self.meta.len() as u32)..entity.index());
-            let new_free_cursor = self.pending.len() as IdCursor;
-            *self.free_cursor.get_mut() = new_free_cursor;
-            self.meta
-                .resize(entity.index() as usize + 1, EntityMeta::EMPTY);
-            AllocAtWithoutReplacement::DidNotExist
-        } else if let Some(index) = self.pending.iter().position(|item| *item == entity.index()) {
-            self.pending.swap_remove(index);
-            let new_free_cursor = self.pending.len() as IdCursor;
-            *self.free_cursor.get_mut() = new_free_cursor;
-            AllocAtWithoutReplacement::DidNotExist
-        } else {
-            let current_meta = &self.meta[entity.index() as usize];
-            if current_meta.location.archetype_id == ArchetypeId::INVALID {
-                AllocAtWithoutReplacement::DidNotExist
-            } else if current_meta.generation == entity.generation {
-                AllocAtWithoutReplacement::Exists(current_meta.location)
-            } else {
-                return AllocAtWithoutReplacement::ExistsWithWrongGeneration;
-            }
-        };
-
-        self.meta[entity.index() as usize].generation = entity.generation;
-        result
+        self.reserve_entity()
     }
 
     /// Destroy an entity, allowing it to be reused.
     ///
     /// Must not be called while reserved entities are awaiting `flush()`.
     pub fn free(&mut self, entity: Entity) -> Option<EntityLocation> {
-        self.verify_flushed();
+        self.free_with_reserve_generations(entity, 1)
+    }
 
+    /// Destroy an entity, allowing it to be reused.
+    ///
+    /// Increments the `generation` of the freed [`Entity`]. The next entity ID allocated with this
+    /// `index` will count `generation` starting from the prior `generation` + the specified
+    /// value + 1.
+    ///
+    /// Must not be called while reserved entities are awaiting `flush()`.
+    pub fn free_with_reserve_generations(
+        &mut self,
+        entity: Entity,
+        generations: u32,
+    ) -> Option<EntityLocation> {
+        self.grow_meta(entity.index());
         let meta = &mut self.meta[entity.index() as usize];
         if meta.generation != entity.generation {
             return None;
         }
 
-        meta.generation = IdentifierMask::inc_masked_high_by(meta.generation, 1);
+        meta.generation = IdentifierMask::inc_masked_high_by(meta.generation, generations + 1);
 
         if meta.generation == NonZero::<u32>::MIN {
             warn!(
@@ -782,31 +740,22 @@ impl Entities {
 
         let loc = mem::replace(&mut meta.location, EntityMeta::EMPTY.location);
 
-        self.pending.push(entity.index());
+        self.allocator.recycle(Entity::from_raw_and_generation(
+            entity.index,
+            meta.generation,
+        ));
+        if loc.archetype_id != ArchetypeId::INVALID {
+            self.len -= 1;
+        }
 
-        let new_free_cursor = self.pending.len() as IdCursor;
-        *self.free_cursor.get_mut() = new_free_cursor;
         Some(loc)
     }
 
     /// Ensure at least `n` allocations can succeed without reallocating.
-    #[expect(
-        clippy::allow_attributes,
-        reason = "`clippy::unnecessary_fallible_conversions` may not always lint."
-    )]
-    #[allow(
-        clippy::unnecessary_fallible_conversions,
-        reason = "`IdCursor::try_from` may fail on 32-bit platforms."
-    )]
     pub fn reserve(&mut self, additional: u32) {
-        self.verify_flushed();
-
-        let freelist_size = *self.free_cursor.get_mut();
-        let shortfall = IdCursor::try_from(additional)
-            .expect("64-bit atomic operations are not supported on this platform.")
-            - freelist_size;
-        if shortfall > 0 {
-            self.meta.reserve(shortfall as usize);
+        let recycled_count = self.allocator.recycled_count();
+        if additional as usize > recycled_count {
+            self.meta.reserve(additional as usize - recycled_count);
         }
     }
 
@@ -818,11 +767,18 @@ impl Entities {
             .is_some_and(|e| e.generation() == entity.generation())
     }
 
-    /// Clears all [`Entity`] from the World.
+    /// Clears all [`Entity`] metadata from the World.
     pub fn clear(&mut self) {
-        self.meta.clear();
-        self.pending.clear();
-        *self.free_cursor.get_mut() = 0;
+        // We can't simply `meta.clear()` because other code holding
+        // references to the entity allocator may have reserved indexes.
+        // Instead, we manually free each entity.
+        for index in 0..self.meta.len() {
+            let meta = &self.meta[index];
+            if meta.location.archetype_id != ArchetypeId::INVALID {
+                let entity = Entity::from_raw_and_generation(index as u32, meta.generation);
+                self.free(entity);
+            }
+        }
     }
 
     /// Returns the location of an [`Entity`].
@@ -845,32 +801,26 @@ impl Entities {
     /// the entity around in storage.
     ///
     /// # Safety
-    ///  - `index` must be a valid entity index.
     ///  - `location` must be valid for the entity at `index` or immediately made valid afterwards
     ///    before handing control to unknown code.
     #[inline]
     pub(crate) unsafe fn set(&mut self, index: u32, location: EntityLocation) {
-        // SAFETY: Caller guarantees that `index` a valid entity index
+        self.grow_meta(index);
+        // SAFETY: We just resized `self.meta` to ensure `index` was in range
         let meta = unsafe { self.meta.get_unchecked_mut(index as usize) };
+        if meta.location.archetype_id == ArchetypeId::INVALID {
+            self.len += 1;
+        }
+        if location.archetype_id == ArchetypeId::INVALID {
+            self.len -= 1;
+        }
         meta.location = location;
     }
 
-    /// Increments the `generation` of a freed [`Entity`]. The next entity ID allocated with this
-    /// `index` will count `generation` starting from the prior `generation` + the specified
-    /// value + 1.
-    ///
-    /// Does nothing if no entity with this `index` has been allocated yet.
-    pub(crate) fn reserve_generations(&mut self, index: u32, generations: u32) -> bool {
-        if (index as usize) >= self.meta.len() {
-            return false;
-        }
-
-        let meta = &mut self.meta[index as usize];
-        if meta.location.archetype_id == ArchetypeId::INVALID {
-            meta.generation = IdentifierMask::inc_masked_high_by(meta.generation, generations);
-            true
-        } else {
-            false
+    /// Extends `meta` to ensure that `index` is valid.
+    fn grow_meta(&mut self, index: u32) {
+        if index as usize >= self.meta.len() {
+            self.meta.resize(index as usize + 1, EntityMeta::EMPTY);
         }
     }
 
@@ -881,72 +831,11 @@ impl Entities {
     /// Note that [`contains`](Entities::contains) will correctly return false for freed
     /// entities, since it checks the generation
     pub fn resolve_from_id(&self, index: u32) -> Option<Entity> {
-        let idu = index as usize;
-        if let Some(&EntityMeta { generation, .. }) = self.meta.get(idu) {
+        if let Some(&EntityMeta { generation, .. }) = self.meta.get(index as usize) {
             Some(Entity::from_raw_and_generation(index, generation))
         } else {
-            // `id` is outside of the meta list - check whether it is reserved but not yet flushed.
-            let free_cursor = self.free_cursor.load(Ordering::Relaxed);
-            // If this entity was manually created, then free_cursor might be positive
-            // Returning None handles that case correctly
-            let num_pending = usize::try_from(-free_cursor).ok()?;
-            (idu < self.meta.len() + num_pending).then_some(Entity::from_raw(index))
-        }
-    }
-
-    fn needs_flush(&mut self) -> bool {
-        *self.free_cursor.get_mut() != self.pending.len() as IdCursor
-    }
-
-    /// Allocates space for entities previously reserved with [`reserve_entity`](Entities::reserve_entity) or
-    /// [`reserve_entities`](Entities::reserve_entities), then initializes each one using the supplied function.
-    ///
-    /// # Safety
-    /// Flush _must_ set the entity location to the correct [`ArchetypeId`] for the given [`Entity`]
-    /// each time init is called. This _can_ be [`ArchetypeId::INVALID`], provided the [`Entity`]
-    /// has not been assigned to an [`Archetype`][crate::archetype::Archetype].
-    ///
-    /// Note: freshly-allocated entities (ones which don't come from the pending list) are guaranteed
-    /// to be initialized with the invalid archetype.
-    pub unsafe fn flush(&mut self, mut init: impl FnMut(Entity, &mut EntityLocation)) {
-        let free_cursor = self.free_cursor.get_mut();
-        let current_free_cursor = *free_cursor;
-
-        let new_free_cursor = if current_free_cursor >= 0 {
-            current_free_cursor as usize
-        } else {
-            let old_meta_len = self.meta.len();
-            let new_meta_len = old_meta_len + -current_free_cursor as usize;
-            self.meta.resize(new_meta_len, EntityMeta::EMPTY);
-            for (index, meta) in self.meta.iter_mut().enumerate().skip(old_meta_len) {
-                init(
-                    Entity::from_raw_and_generation(index as u32, meta.generation),
-                    &mut meta.location,
-                );
-            }
-
-            *free_cursor = 0;
-            0
-        };
-
-        for index in self.pending.drain(new_free_cursor..) {
-            let meta = &mut self.meta[index as usize];
-            init(
-                Entity::from_raw_and_generation(index, meta.generation),
-                &mut meta.location,
-            );
-        }
-    }
-
-    /// Flushes all reserved entities to an "invalid" state. Attempting to retrieve them will return `None`
-    /// unless they are later populated with a valid archetype.
-    pub fn flush_as_invalid(&mut self) {
-        // SAFETY: as per `flush` safety docs, the archetype id can be set to [`ArchetypeId::INVALID`] if
-        // the [`Entity`] has not been assigned to an [`Archetype`][crate::archetype::Archetype], which is the case here
-        unsafe {
-            self.flush(|_entity, location| {
-                location.archetype_id = ArchetypeId::INVALID;
-            });
+            let total_count = self.allocator.total_count();
+            (index < total_count).then_some(Entity::from_raw(index))
         }
     }
 
@@ -958,39 +847,20 @@ impl Entities {
     ///
     /// [`World`]: crate::world::World
     #[inline]
-    pub fn total_count(&self) -> usize {
-        self.meta.len()
-    }
-
-    /// The count of all entities in the [`World`] that are used,
-    /// including both those allocated and those reserved, but not those freed.
-    ///
-    /// [`World`]: crate::world::World
-    #[inline]
-    pub fn used_count(&self) -> usize {
-        (self.meta.len() as isize - self.free_cursor.load(Ordering::Relaxed) as isize) as usize
-    }
-
-    /// The count of all entities in the [`World`] that have ever been allocated or reserved, including those that are freed.
-    /// This is the value that [`Self::total_count()`] would return if [`Self::flush()`] were called right now.
-    ///
-    /// [`World`]: crate::world::World
-    #[inline]
-    pub fn total_prospective_count(&self) -> usize {
-        self.meta.len() + (-self.free_cursor.load(Ordering::Relaxed)).min(0) as usize
+    pub fn total_count(&self) -> u32 {
+        self.allocator.total_count()
     }
 
     /// The count of currently allocated entities.
     #[inline]
     pub fn len(&self) -> u32 {
-        // `pending`, by definition, can't be bigger than `meta`.
-        (self.meta.len() - self.pending.len()) as u32
+        self.len
     }
 
     /// Checks if any entity is currently active.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.len == 0
     }
 
     /// Sets the source code location from which this entity has last been spawned
@@ -1123,7 +993,7 @@ pub struct EntityLocation {
 }
 
 impl EntityLocation {
-    /// location for **pending entity** and **invalid entity**
+    /// location for **pending entity**
     pub(crate) const INVALID: EntityLocation = EntityLocation {
         archetype_id: ArchetypeId::INVALID,
         archetype_row: ArchetypeRow::INVALID,
@@ -1153,25 +1023,28 @@ mod tests {
     #[test]
     fn reserve_entity_len() {
         let mut e = Entities::new();
-        e.reserve_entity();
-        // SAFETY: entity_location is left invalid
-        unsafe { e.flush(|_, _| {}) };
+        let id = e.reserve_entity();
+        // SAFETY: We never hand off control to other code
+        unsafe {
+            e.set(
+                id.index(),
+                EntityLocation {
+                    archetype_id: ArchetypeId::new(0),
+                    archetype_row: ArchetypeRow::new(0),
+                    table_id: TableId::from_u32(0),
+                    table_row: TableRow::from_u32(0),
+                },
+            );
+        }
         assert_eq!(e.len(), 1);
     }
 
     #[test]
     fn get_reserved_and_invalid() {
-        let mut entities = Entities::new();
+        let entities = Entities::new();
         let e = entities.reserve_entity();
         assert!(entities.contains(e));
         assert!(entities.get(e).is_none());
-
-        // SAFETY: entity_location is left invalid
-        unsafe {
-            entities.flush(|_entity, _location| {
-                // do nothing ... leaving entity location invalid
-            });
-        };
 
         assert!(entities.contains(e));
         assert!(entities.get(e).is_none());
@@ -1195,23 +1068,22 @@ mod tests {
     }
 
     #[test]
-    fn reserve_generations() {
+    fn free_with_reserve_generations() {
         let mut entities = Entities::new();
         let entity = entities.alloc();
-        entities.free(entity);
-
-        assert!(entities.reserve_generations(entity.index(), 1));
+        assert!(entities.free_with_reserve_generations(entity, 1).is_some());
     }
 
     #[test]
-    fn reserve_generations_and_alloc() {
+    fn free_with_reserve_generations_and_alloc() {
         const GENERATIONS: u32 = 10;
 
         let mut entities = Entities::new();
         let entity = entities.alloc();
-        entities.free(entity);
 
-        assert!(entities.reserve_generations(entity.index(), GENERATIONS));
+        assert!(entities
+            .free_with_reserve_generations(entity, GENERATIONS)
+            .is_some());
 
         // The very next entity allocated should be a further generation on the same index
         let next_entity = entities.alloc();
