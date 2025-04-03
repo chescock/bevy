@@ -2493,10 +2493,7 @@ impl DynSystemParamState {
 }
 
 /// Allows a [`SystemParam::State`] to be used as a trait object for implementing [`DynSystemParam`].
-trait DynParamState: Sync + Send {
-    /// Casts the underlying `ParamState<T>` to an `Any` so it can be downcast.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-
+trait DynParamState: Any + Sync + Send {
     /// For the specified [`Archetype`], registers the components accessed by this [`SystemParam`] (if applicable).a
     ///
     /// # Safety
@@ -2527,10 +2524,6 @@ trait DynParamState: Sync + Send {
 struct ParamState<T: SystemParam>(T::State);
 
 impl<T: SystemParam + 'static> DynParamState for ParamState<T> {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     unsafe fn new_archetype(&mut self, archetype: &Archetype, system_meta: &mut SystemMeta) {
         // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
         unsafe { T::new_archetype(&mut self.0, archetype, system_meta) };
@@ -2580,18 +2573,11 @@ unsafe impl SystemParam for DynSystemParam<'_, '_> {
         change_tick: Tick,
     ) -> Self::Item<'world, 'state> {
         // SAFETY:
-        // - `state.0` is a boxed `ParamState<T>`, and its implementation of `as_any_mut` returns `self`.
+        // - `state.0` is a boxed `ParamState<T>`.
         // - The state was obtained from `SystemParamBuilder::build()`, which registers all [`World`] accesses used
         //   by [`SystemParam::get_param`] with the provided [`system_meta`](SystemMeta).
         // - The caller ensures that the provided world is the same and has the required access.
-        unsafe {
-            DynSystemParam::new(
-                state.0.as_any_mut(),
-                world,
-                system_meta.clone(),
-                change_tick,
-            )
-        }
+        unsafe { DynSystemParam::new(&mut state.0, world, system_meta.clone(), change_tick) }
     }
 
     unsafe fn new_archetype(
