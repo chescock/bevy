@@ -14,7 +14,7 @@ use tracing::{info_span, Span};
 
 use crate::{
     archetype::ArchetypeComponentId,
-    error::{default_error_handler, BevyError, ErrorContext, Result},
+    error::{default_error_handler, ErrorContext, Result},
     prelude::Resource,
     query::Access,
     schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
@@ -131,7 +131,6 @@ pub struct ExecutorState {
 struct Context<'scope, 'env, 'sys> {
     environment: &'env Environment<'env, 'sys>,
     scope: &'scope Scope<'scope, 'env, ()>,
-    error_handler: fn(BevyError, ErrorContext),
 }
 
 impl Default for MultiThreadedExecutor {
@@ -182,7 +181,6 @@ impl SystemExecutor for MultiThreadedExecutor {
         schedule: &mut SystemSchedule,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
-        error_handler: fn(BevyError, ErrorContext),
     ) {
         let state = self.state.get_mut().unwrap();
         // reset counts
@@ -222,11 +220,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             false,
             thread_executor,
             |scope| {
-                let context = Context {
-                    environment,
-                    scope,
-                    error_handler,
-                };
+                let context = Context { environment, scope };
 
                 // The first tick won't need to process finished systems, but we still need to run the loop in
                 // tick_executor() in case a system completes while the first tick still holds the mutex.
@@ -538,7 +532,6 @@ impl ExecutorState {
         world: UnsafeWorldCell,
     ) -> bool {
         let mut should_run = !self.skipped_systems.contains(system_index);
-        let error_handler = default_error_handler();
 
         for set_idx in conditions.sets_with_conditions_of_systems[system_index].ones() {
             if self.evaluated_sets.contains(set_idx) {
@@ -587,7 +580,7 @@ impl ExecutorState {
                 Ok(()) => true,
                 Err(e) => {
                     if !e.skipped {
-                        error_handler(
+                        default_error_handler()(
                             e.into(),
                             ErrorContext::System {
                                 name: system.name(),
@@ -635,7 +628,7 @@ impl ExecutorState {
                         system,
                         context.environment.world_cell,
                     ) {
-                        (context.error_handler)(
+                        default_error_handler()(
                             err,
                             ErrorContext::System {
                                 name: system.name(),
@@ -687,7 +680,7 @@ impl ExecutorState {
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     if let Err(err) = __rust_begin_short_backtrace::run(system, world) {
-                        (context.error_handler)(
+                        default_error_handler()(
                             err,
                             ErrorContext::System {
                                 name: system.name(),
@@ -787,8 +780,6 @@ unsafe fn evaluate_and_fold_conditions(
     conditions: &mut [BoxedCondition],
     world: UnsafeWorldCell,
 ) -> bool {
-    let error_handler = default_error_handler();
-
     #[expect(
         clippy::unnecessary_fold,
         reason = "Short-circuiting here would prevent conditions from mutating their own state as needed."
@@ -804,7 +795,7 @@ unsafe fn evaluate_and_fold_conditions(
                 Ok(()) => (),
                 Err(e) => {
                     if !e.skipped {
-                        error_handler(
+                        default_error_handler()(
                             e.into(),
                             ErrorContext::System {
                                 name: condition.name(),

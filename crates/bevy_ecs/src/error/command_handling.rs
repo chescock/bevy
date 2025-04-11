@@ -16,12 +16,7 @@ pub trait HandleError<Out = ()> {
     fn handle_error_with(self, error_handler: fn(BevyError, ErrorContext)) -> impl Command;
     /// Takes a [`Command`] that returns a Result and uses the default error handler function to convert it into
     /// a [`Command`] that internally handles an error if it occurs and returns `()`.
-    fn handle_error(self) -> impl Command
-    where
-        Self: Sized,
-    {
-        self.handle_error_with(default_error_handler())
-    }
+    fn handle_error(self) -> impl Command;
 }
 
 impl<C, T, E> HandleError<Result<T, E>> for C
@@ -33,6 +28,21 @@ where
         move |world: &mut World| match self.apply(world) {
             Ok(_) => {}
             Err(err) => (error_handler)(
+                err.into(),
+                ErrorContext::Command {
+                    name: type_name::<C>().into(),
+                },
+            ),
+        }
+    }
+
+    fn handle_error(self) -> impl Command
+    where
+        Self: Sized,
+    {
+        move |world: &mut World| match self.apply(world) {
+            Ok(_) => {}
+            Err(err) => default_error_handler()(
                 err.into(),
                 ErrorContext::Command {
                     name: type_name::<C>().into(),

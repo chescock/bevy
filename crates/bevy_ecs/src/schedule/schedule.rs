@@ -27,7 +27,6 @@ use tracing::info_span;
 
 use crate::{
     component::{ComponentId, Components, Tick},
-    error::default_error_handler,
     prelude::Component,
     resource::Resource,
     schedule::*,
@@ -441,11 +440,8 @@ impl Schedule {
         self.initialize(world)
             .unwrap_or_else(|e| panic!("Error when initializing schedule {:?}: {e}", self.label));
 
-        let error_handler = default_error_handler();
-
         #[cfg(not(feature = "bevy_debug_stepping"))]
-        self.executor
-            .run(&mut self.executable, world, None, error_handler);
+        self.executor.run(&mut self.executable, world, None);
 
         #[cfg(feature = "bevy_debug_stepping")]
         {
@@ -454,12 +450,8 @@ impl Schedule {
                 Some(mut stepping) => stepping.skipped_systems(self),
             };
 
-            self.executor.run(
-                &mut self.executable,
-                world,
-                skip_systems.as_ref(),
-                error_handler,
-            );
+            self.executor
+                .run(&mut self.executable, world, skip_systems.as_ref());
         }
     }
 

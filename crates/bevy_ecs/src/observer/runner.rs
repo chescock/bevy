@@ -380,7 +380,6 @@ fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
             .get::<Observer>()
             .debug_checked_unwrap()
             .error_handler
-            .debug_checked_unwrap()
     };
 
     let trigger: Trigger<E, B> = Trigger::new(
@@ -409,7 +408,7 @@ fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
         match (*system).validate_param_unsafe(world) {
             Ok(()) => {
                 if let Err(err) = (*system).run_unsafe(trigger, world) {
-                    error_handler(
+                    error_handler.unwrap_or_else(default_error_handler)(
                         err,
                         ErrorContext::Observer {
                             name: (*system).name(),
@@ -421,7 +420,7 @@ fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
             }
             Err(e) => {
                 if !e.skipped {
-                    error_handler(
+                    error_handler.unwrap_or_else(default_error_handler)(
                         e.into(),
                         ErrorContext::Observer {
                             name: (*system).name(),
@@ -458,15 +457,10 @@ fn hook_on_add<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
             ..Default::default()
         };
 
-        let error_handler = default_error_handler();
-
         // Initialize System
         let system: *mut dyn ObserverSystem<E, B> =
             if let Some(mut observe) = world.get_mut::<Observer>(entity) {
                 descriptor.merge(&observe.descriptor);
-                if observe.error_handler.is_none() {
-                    observe.error_handler = Some(error_handler);
-                }
                 let system = observe.system.downcast_mut::<S>().unwrap();
                 &mut *system
             } else {
