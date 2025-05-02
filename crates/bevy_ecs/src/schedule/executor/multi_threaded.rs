@@ -30,6 +30,7 @@ struct Environment<'env, 'sys> {
     systems: &'sys [SyncUnsafeCell<ScheduleSystem>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
+    error_handler: fn(BevyError, ErrorContext),
 }
 
 struct Conditions<'a> {
@@ -44,6 +45,7 @@ impl<'env, 'sys> Environment<'env, 'sys> {
         executor: &'env MultiThreadedExecutor,
         schedule: &'sys mut SystemSchedule,
         world: &'env mut World,
+        error_handler: fn(BevyError, ErrorContext),
     ) -> Self {
         Environment {
             executor,
@@ -55,6 +57,7 @@ impl<'env, 'sys> Environment<'env, 'sys> {
                 systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
             }),
             world_cell: world.as_unsafe_world_cell(),
+            error_handler,
         }
     }
 }
@@ -131,7 +134,6 @@ pub struct ExecutorState {
 struct Context<'scope, 'env, 'sys> {
     environment: &'env Environment<'env, 'sys>,
     scope: &'scope Scope<'scope, 'env, ()>,
-    error_handler: fn(BevyError, ErrorContext),
 }
 
 impl Default for MultiThreadedExecutor {
@@ -216,17 +218,13 @@ impl SystemExecutor for MultiThreadedExecutor {
             .map(|e| e.0.clone());
         let thread_executor = thread_executor.as_deref();
 
-        let environment = &Environment::new(self, schedule, world);
+        let environment = &Environment::new(self, schedule, world, error_handler);
 
         ComputeTaskPool::get_or_init(TaskPool::default).scope_with_executor(
             false,
             thread_executor,
             |scope| {
-                let context = Context {
-                    environment,
-                    scope,
-                    error_handler,
-                };
+                let context = Context { environment, scope };
 
                 // The first tick won't need to process finished systems, but we still need to run the loop in
                 // tick_executor() in case a system completes while the first tick still holds the mutex.
@@ -635,7 +633,7 @@ impl ExecutorState {
                         system,
                         context.environment.world_cell,
                     ) {
-                        (context.error_handler)(
+                        (context.environment.error_handler)(
                             err,
                             ErrorContext::System {
                                 name: system.name(),
@@ -687,7 +685,7 @@ impl ExecutorState {
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     if let Err(err) = __rust_begin_short_backtrace::run(system, world) {
-                        (context.error_handler)(
+                        (context.environment.error_handler)(
                             err,
                             ErrorContext::System {
                                 name: system.name(),
