@@ -1,6 +1,6 @@
 pub use crate::change_detection::{NonSendMut, Res, ResMut};
 use crate::{
-    archetype::Archetypes,
+    archetype::{Archetype, Archetypes},
     bundle::Bundles,
     change_detection::{MaybeLocation, Ticks, TicksMut},
     component::{ComponentId, ComponentTicks, Components, Tick},
@@ -223,6 +223,23 @@ pub unsafe trait SystemParam: Sized {
     /// Registers any [`World`] access used by this [`SystemParam`]
     /// and creates a new instance of this param's [`State`](SystemParam::State).
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State;
+
+    /// Has no effect and should not be called or implemented.
+    #[inline]
+    #[deprecated(
+        since = "0.17.0",
+        note = "No longer has any effect.  Calls should be removed.  Implementations should move their logic to `validate_param` or `get_param`."
+    )]
+    #[expect(
+        unused_variables,
+        reason = "The parameters here are intentionally unused by the default implementation; however, putting underscores here will result in the underscores being copied by rust-analyzer's tab completion."
+    )]
+    unsafe fn new_archetype(
+        state: &mut Self::State,
+        archetype: &Archetype,
+        system_meta: &mut SystemMeta,
+    ) {
+    }
 
     /// Applies any deferred mutations stored in this [`SystemParam`]'s state.
     /// This is used to apply [`Commands`] during [`ApplyDeferred`](crate::prelude::ApplyDeferred).

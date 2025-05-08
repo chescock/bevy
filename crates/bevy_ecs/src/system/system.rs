@@ -145,6 +145,13 @@ pub trait System: Send + Sync + 'static {
     /// Initialize the system.
     fn initialize(&mut self, _world: &mut World);
 
+    /// Has no effect and should not be called or implemented.
+    #[deprecated(
+        since = "0.17.0",
+        note = "No longer has any effect.  Calls should be removed.  Implementations should move their logic to `validate_param_unsafe` or `run_unsafe`."
+    )]
+    fn update_archetype_component_access(&mut self, _world: UnsafeWorldCell) {}
+
     /// Checks any [`Tick`]s stored on this system and wraps their value if they get too old.
     ///
     /// This method must be called periodically to ensure that change detection behaves correctly.

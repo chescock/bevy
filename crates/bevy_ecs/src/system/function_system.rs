@@ -393,6 +393,42 @@ impl<Param: SystemParam> SystemState<Param> {
         }
     }
 
+    /// Has no effect
+    #[inline]
+    #[deprecated(
+        since = "0.17.0",
+        note = "No longer has any effect.  Calls may be removed."
+    )]
+    pub fn update_archetypes(&mut self, _world: &World) {}
+
+    /// Has no effect
+    #[inline]
+    #[deprecated(
+        since = "0.17.0",
+        note = "No longer has any effect.  Calls may be removed."
+    )]
+    pub fn update_archetypes_unsafe_world_cell(&mut self, _world: UnsafeWorldCell) {}
+
+    /// Identical to [`SystemState::get`].
+    #[inline]
+    #[deprecated(since = "0.17.0", note = "Call `SystemState::get` instead.")]
+    pub fn get_manual<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, Param>
+    where
+        Param: ReadOnlySystemParam,
+    {
+        self.get(world)
+    }
+
+    /// Identical to [`SystemState::get`].
+    #[inline]
+    #[deprecated(since = "0.17.0", note = "Call `SystemState::get_mut` instead.")]
+    pub fn get_manual_mut<'w, 's>(
+        &'s mut self,
+        world: &'w mut World,
+    ) -> SystemParamItem<'w, 's, Param> {
+        self.get_mut(world)
+    }
+
     /// Retrieve the [`SystemParam`] values.
     ///
     /// # Safety
