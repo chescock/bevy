@@ -12,7 +12,8 @@ use std::eprintln;
 use crate::{
     error::{default_error_handler, BevyError, ErrorContext},
     schedule::{
-        executor::is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule,
+        executor::is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor,
+        SystemSchedule,
     },
     world::World,
 };
@@ -91,7 +92,7 @@ impl SystemExecutor for SimpleExecutor {
 
             should_run &= system_conditions_met;
 
-            let system = &mut schedule.systems[system_index];
+            let system = &mut schedule.systems[system_index].system;
             if should_run {
                 let valid_params = match system.validate_param(world) {
                     Ok(()) => true,
@@ -175,7 +176,7 @@ impl SimpleExecutor {
     since = "0.17.0",
     note = "Use SingleThreadedExecutor instead. See https://github.com/bevyengine/bevy/issues/18453 for motivation."
 )]
-fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut World) -> bool {
+fn evaluate_and_fold_conditions(conditions: &mut [ConditionWithAccess], world: &mut World) -> bool {
     let error_handler = default_error_handler();
 
     #[expect(
@@ -184,7 +185,7 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut W
     )]
     conditions
         .iter_mut()
-        .map(|condition| {
+        .map(|ConditionWithAccess { condition, .. }| {
             match condition.validate_param(world) {
                 Ok(()) => (),
                 Err(e) => {

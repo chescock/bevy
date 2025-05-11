@@ -9,7 +9,9 @@ use std::eprintln;
 
 use crate::{
     error::{default_error_handler, BevyError, ErrorContext},
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
+    schedule::{
+        is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
+    },
     world::World,
 };
 
@@ -91,7 +93,7 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             should_run &= system_conditions_met;
 
-            let system = &mut schedule.systems[system_index];
+            let system = &mut schedule.systems[system_index].system;
             if should_run {
                 let valid_params = match system.validate_param(world) {
                     Ok(()) => true,
@@ -185,7 +187,7 @@ impl SingleThreadedExecutor {
 
     fn apply_deferred(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
         for system_index in self.unapplied_systems.ones() {
-            let system = &mut schedule.systems[system_index];
+            let system = &mut schedule.systems[system_index].system;
             system.apply_deferred(world);
         }
 
@@ -193,7 +195,7 @@ impl SingleThreadedExecutor {
     }
 }
 
-fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut World) -> bool {
+fn evaluate_and_fold_conditions(conditions: &mut [ConditionWithAccess], world: &mut World) -> bool {
     let error_handler: fn(BevyError, ErrorContext) = default_error_handler();
 
     #[expect(
@@ -202,7 +204,7 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut W
     )]
     conditions
         .iter_mut()
-        .map(|condition| {
+        .map(|ConditionWithAccess { condition, .. }| {
             match condition.validate_param(world) {
                 Ok(()) => (),
                 Err(e) => {
