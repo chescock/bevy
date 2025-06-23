@@ -29,7 +29,6 @@ mod tests {
     use alloc::{string::ToString, vec, vec::Vec};
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use crate::error::BevyError;
     pub use crate::{
         prelude::World,
         resource::Resource,
@@ -254,7 +253,7 @@ mod tests {
 
     mod conditions {
 
-        use crate::change_detection::DetectChanges;
+        use crate::{change_detection::DetectChanges, error::Result};
 
         use super::*;
 
@@ -286,14 +285,14 @@ mod tests {
             world.init_resource::<SystemOrder>();
 
             schedule.add_systems((
-                make_function_system(0).run_if(|| Err::<bool, BevyError>(core::fmt::Error.into())),
-                make_function_system(1).run_if(|| Ok(false)),
+                make_function_system(0).run_if(|| -> Result<bool> { Err(core::fmt::Error.into()) }),
+                make_function_system(1).run_if(|| -> Result<bool> { Ok(false) }),
             ));
 
             schedule.run(&mut world);
             assert_eq!(world.resource::<SystemOrder>().0, vec![]);
 
-            schedule.add_systems(make_function_system(2).run_if(|| Ok(true)));
+            schedule.add_systems(make_function_system(2).run_if(|| -> Result<bool> { Ok(true) }));
 
             schedule.run(&mut world);
             assert_eq!(world.resource::<SystemOrder>().0, vec![2]);
