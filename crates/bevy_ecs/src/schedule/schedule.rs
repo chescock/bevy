@@ -1035,6 +1035,11 @@ impl ScheduleGraph {
 
                         for previous_node in previous_nodes {
                             for current_node in current_nodes {
+                                assert!(
+                                    previous_node != current_node,
+                                    "Cannot chain system set {} with itself",
+                                    self.get_node_name(current_node),
+                                );
                                 self.dependency
                                     .graph
                                     .add_edge(*previous_node, *current_node);
@@ -2982,6 +2987,14 @@ mod tests {
         let result = schedule.graph.configure_set_inner(config);
         let name = format!("{:?}", TestSet::First);
         assert_eq!(result, Err(ScheduleBuildError::HierarchyLoop(name)));
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot chain system set First with itself")]
+    fn set_chained_to_self_fails() {
+        // Without a panic here, we hit a `debug_assert` when doing a toposort in `initialize`.
+        let mut schedule = Schedule::new(TestSchedule);
+        schedule.configure_sets((TestSet::First, TestSet::First).chain());
     }
 
     #[test]
