@@ -189,15 +189,15 @@ impl ReflectComponent {
     }
 
     /// Returns whether entity contains this [`Component`]
-    pub fn contains<'a>(&self, entity: impl Into<FilteredEntityRef<'a, '_>>) -> bool {
+    pub fn contains<'w, 's>(&self, entity: impl Into<FilteredEntityRef<'w, 's>>) -> bool {
         (self.0.contains)(entity.into())
     }
 
     /// Gets the value of this [`Component`] type from the entity as a reflected reference.
-    pub fn reflect<'a>(
+    pub fn reflect<'w, 's>(
         &self,
-        entity: impl Into<FilteredEntityRef<'a, '_>>,
-    ) -> Option<&'a dyn Reflect> {
+        entity: impl Into<FilteredEntityRef<'w, 's>>,
+    ) -> Option<&'w dyn Reflect> {
         (self.0.reflect)(entity.into())
     }
 
@@ -206,10 +206,10 @@ impl ReflectComponent {
     /// # Panics
     ///
     /// Panics if [`Component`] is immutable.
-    pub fn reflect_mut<'a>(
+    pub fn reflect_mut<'w, 's>(
         &self,
-        entity: impl Into<FilteredEntityMut<'a, '_>>,
-    ) -> Option<Mut<'a, dyn Reflect>> {
+        entity: impl Into<FilteredEntityMut<'w, 's>>,
+    ) -> Option<Mut<'w, dyn Reflect>> {
         (self.0.reflect_mut)(entity.into())
     }
 
