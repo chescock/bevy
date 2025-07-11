@@ -3561,24 +3561,6 @@ impl<'a> From<&'a EntityWorldMut<'_>> for FilteredEntityRef<'a, 'static> {
     }
 }
 
-impl<'w, 's, B: Bundle> From<&'w EntityRefExcept<'_, B>> for FilteredEntityRef<'w, 's> {
-    fn from(value: &'w EntityRefExcept<'_, B>) -> Self {
-        // SAFETY:
-        // - The FilteredEntityRef has the same component access as the given EntityRefExcept.
-        unsafe {
-            let mut access = Access::default();
-            access.read_all();
-            let components = value.entity.world().components();
-            B::get_component_ids(components, &mut |maybe_id| {
-                if let Some(id) = maybe_id {
-                    access.remove_component_read(id);
-                }
-            });
-            FilteredEntityRef::new(value.entity, &access)
-        }
-    }
-}
-
 impl PartialEq for FilteredEntityRef<'_, '_> {
     fn eq(&self, other: &Self) -> bool {
         self.entity() == other.entity()
@@ -3898,24 +3880,6 @@ impl<'a> From<&'a mut EntityWorldMut<'_>> for FilteredEntityMut<'a, 'static> {
                 entity.as_unsafe_entity_cell(),
                 const { &Access::new_write_all() },
             )
-        }
-    }
-}
-
-impl<'w, 's, B: Bundle> From<&'w EntityMutExcept<'_, B>> for FilteredEntityMut<'w, 's> {
-    fn from(value: &'w EntityMutExcept<'_, B>) -> Self {
-        // SAFETY:
-        // - The FilteredEntityMut has the same component access as the given EntityMutExcept.
-        unsafe {
-            let mut access = Access::default();
-            access.write_all();
-            let components = value.entity.world().components();
-            B::get_component_ids(components, &mut |maybe_id| {
-                if let Some(id) = maybe_id {
-                    access.remove_component_read(id);
-                }
-            });
-            FilteredEntityMut::new(value.entity, &access)
         }
     }
 }
