@@ -118,9 +118,9 @@ pub struct ReflectComponentFns {
     /// Function pointer implementing [`ReflectComponent::contains()`].
     pub contains: fn(FilteredEntityRef) -> bool,
     /// Function pointer implementing [`ReflectComponent::reflect()`].
-    pub reflect: fn(FilteredEntityRef) -> Option<&dyn Reflect>,
+    pub reflect: for<'w> fn(FilteredEntityRef<'w, '_>) -> Option<&'w dyn Reflect>,
     /// Function pointer implementing [`ReflectComponent::reflect_mut()`].
-    pub reflect_mut: fn(FilteredEntityMut) -> Option<Mut<dyn Reflect>>,
+    pub reflect_mut: for<'w> fn(FilteredEntityMut<'w, '_>) -> Option<Mut<'w, dyn Reflect>>,
     /// Function pointer implementing [`ReflectComponent::map_entities()`].
     pub map_entities: fn(&mut dyn Reflect, &mut dyn EntityMapper),
     /// Function pointer implementing [`ReflectComponent::reflect_unchecked_mut()`].
@@ -189,12 +189,15 @@ impl ReflectComponent {
     }
 
     /// Returns whether entity contains this [`Component`]
-    pub fn contains<'a>(&self, entity: impl Into<FilteredEntityRef<'a>>) -> bool {
+    pub fn contains<'a>(&self, entity: impl Into<FilteredEntityRef<'a, '_>>) -> bool {
         (self.0.contains)(entity.into())
     }
 
     /// Gets the value of this [`Component`] type from the entity as a reflected reference.
-    pub fn reflect<'a>(&self, entity: impl Into<FilteredEntityRef<'a>>) -> Option<&'a dyn Reflect> {
+    pub fn reflect<'a>(
+        &self,
+        entity: impl Into<FilteredEntityRef<'a, '_>>,
+    ) -> Option<&'a dyn Reflect> {
         (self.0.reflect)(entity.into())
     }
 
@@ -205,7 +208,7 @@ impl ReflectComponent {
     /// Panics if [`Component`] is immutable.
     pub fn reflect_mut<'a>(
         &self,
-        entity: impl Into<FilteredEntityMut<'a>>,
+        entity: impl Into<FilteredEntityMut<'a, '_>>,
     ) -> Option<Mut<'a, dyn Reflect>> {
         (self.0.reflect_mut)(entity.into())
     }
