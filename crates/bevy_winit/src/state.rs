@@ -7,7 +7,7 @@ use bevy_ecs::{
     entity::Entity,
     event::{EventCursor, EventWriter},
     prelude::*,
-    system::SystemState,
+    system::{SystemParam, SystemState},
     world::FromWorld,
 };
 #[cfg(feature = "custom_cursor")]
@@ -90,20 +90,23 @@ struct WinitAppRunnerState<T: BufferedEvent> {
     raw_winit_events: Vec<RawWinitWindowEvent>,
     _marker: PhantomData<T>,
 
-    event_writer_system_state: SystemState<(
-        EventWriter<'static, WindowResized>,
-        EventWriter<'static, WindowBackendScaleFactorChanged>,
-        EventWriter<'static, WindowScaleFactorChanged>,
-        Query<
-            'static,
-            'static,
-            (
-                &'static mut Window,
-                &'static mut CachedWindow,
-                &'static mut WinitWindowPressedKeys,
-            ),
-        >,
-    )>,
+    event_writer_system_state: SystemState<WindowEventWriters<'static, 'static>>,
+}
+
+#[derive(SystemParam)]
+struct WindowEventWriters<'w, 's> {
+    window_resized: EventWriter<'w, WindowResized>,
+    window_backend_scale_factor_changed: EventWriter<'w, WindowBackendScaleFactorChanged>,
+    window_scale_factor_changed: EventWriter<'w, WindowScaleFactorChanged>,
+    windows: Query<
+        'w,
+        's,
+        (
+            &'static mut Window,
+            &'static mut CachedWindow,
+            &'static mut WinitWindowPressedKeys,
+        ),
+    >,
 }
 
 impl<T: BufferedEvent> WinitAppRunnerState<T> {
@@ -112,12 +115,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
         #[cfg(feature = "custom_cursor")]
         app.init_resource::<CustomCursorCache>();
 
-        let event_writer_system_state: SystemState<(
-            EventWriter<WindowResized>,
-            EventWriter<WindowBackendScaleFactorChanged>,
-            EventWriter<WindowScaleFactorChanged>,
-            Query<(&mut Window, &mut CachedWindow, &mut WinitWindowPressedKeys)>,
-        )> = SystemState::new(app.world_mut());
+        let event_writer_system_state = SystemState::new(app.world_mut());
 
         Self {
             app,
@@ -260,19 +258,16 @@ impl<T: BufferedEvent> ApplicationHandler<T> for WinitAppRunnerState<T> {
 
         WINIT_WINDOWS.with_borrow(|winit_windows| {
             ACCESS_KIT_ADAPTERS.with_borrow_mut(|access_kit_adapters| {
-                let (
-                    mut window_resized,
-                    mut window_backend_scale_factor_changed,
-                    mut window_scale_factor_changed,
-                    mut windows,
-                ) = self.event_writer_system_state.get_mut(self.app.world_mut());
+                let mut event_writers =
+                    self.event_writer_system_state.get_mut(self.app.world_mut());
 
                 let Some(window) = winit_windows.get_window_entity(window_id) else {
                     warn!("Skipped event {event:?} for unknown winit Window Id {window_id:?}");
                     return;
                 };
 
-                let Ok((mut win, _, mut pressed_keys)) = windows.get_mut(window) else {
+                let Ok((mut win, _, mut pressed_keys)) = event_writers.windows.get_mut(window)
+                else {
                     warn!(
                         "Window {window:?} is missing `Window` component, skipping event {event:?}"
                     );
@@ -295,15 +290,15 @@ impl<T: BufferedEvent> ApplicationHandler<T> for WinitAppRunnerState<T> {
 
                 match event {
                     WindowEvent::Resized(size) => {
-                        react_to_resize(window, &mut win, size, &mut window_resized);
+                        react_to_resize(window, &mut win, size, &mut event_writers.window_resized);
                     }
                     WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                         react_to_scale_factor_change(
                             window,
                             &mut win,
                             scale_factor,
-                            &mut window_backend_scale_factor_changed,
-                            &mut window_scale_factor_changed,
+                            &mut event_writers.window_backend_scale_factor_changed,
+                            &mut event_writers.window_scale_factor_changed,
                         );
                     }
                     WindowEvent::CloseRequested => self
