@@ -91,6 +91,7 @@ struct WinitAppRunnerState<T: BufferedEvent> {
     _marker: PhantomData<T>,
 
     event_writer_system_state: SystemState<WindowEventWriters<'static, 'static>>,
+    focused_windows_state: SystemState<FocusedWindows<'static, 'static>>,
 }
 
 #[derive(SystemParam)]
@@ -109,6 +110,12 @@ struct WindowEventWriters<'w, 's> {
     >,
 }
 
+#[derive(SystemParam)]
+struct FocusedWindows<'w, 's> {
+    config: Res<'w, WinitSettings>,
+    windows: Query<'w, 's, (Entity, &'static Window)>,
+}
+
 impl<T: BufferedEvent> WinitAppRunnerState<T> {
     fn new(mut app: App) -> Self {
         app.add_event::<T>();
@@ -116,6 +123,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
         app.init_resource::<CustomCursorCache>();
 
         let event_writer_system_state = SystemState::new(app.world_mut());
+        let focused_windows_state = SystemState::new(app.world_mut());
 
         Self {
             app,
@@ -135,6 +143,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
             raw_winit_events: Vec::new(),
             _marker: PhantomData,
             event_writer_system_state,
+            focused_windows_state,
         }
     }
 
@@ -548,19 +557,19 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
     fn redraw_requested(&mut self, event_loop: &ActiveEventLoop) {
         let mut redraw_event_reader = EventCursor::<RequestRedraw>::default();
 
-        let mut focused_windows_state: SystemState<(Res<WinitSettings>, Query<(Entity, &Window)>)> =
-            SystemState::new(self.world_mut());
-
         if let Some(app_redraw_events) = self.world().get_resource::<Events<RequestRedraw>>() {
             if redraw_event_reader.read(app_redraw_events).last().is_some() {
                 self.redraw_requested = true;
             }
         }
 
-        let (config, windows) = focused_windows_state.get(self.world());
-        let focused = windows.iter().any(|(_, window)| window.focused);
+        let focused_windows = self.focused_windows_state.get(self.app.world_mut());
+        let focused = focused_windows
+            .windows
+            .iter()
+            .any(|(_, window)| window.focused);
 
-        let mut update_mode = config.update_mode(focused);
+        let mut update_mode = focused_windows.config.update_mode(focused);
         let mut should_update = self.should_update(update_mode);
 
         if self.startup_forced_updates > 0 {
@@ -646,9 +655,9 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
         let begin_frame_time = Instant::now();
 
         if should_update {
-            let (_, windows) = focused_windows_state.get(self.world());
+            let focused_windows = self.focused_windows_state.get(self.app.world_mut());
             // If no windows exist, this will evaluate to `true`.
-            let all_invisible = windows.iter().all(|w| !w.1.visible);
+            let all_invisible = focused_windows.windows.iter().all(|w| !w.1.visible);
 
             // Not redrawing, but the timeout elapsed.
             //
@@ -667,9 +676,12 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
             }
 
             // Running the app may have changed the WinitSettings resource, so we have to re-extract it.
-            let (config, windows) = focused_windows_state.get(self.world());
-            let focused = windows.iter().any(|(_, window)| window.focused);
-            update_mode = config.update_mode(focused);
+            let focused_windows = self.focused_windows_state.get(self.app.world_mut());
+            let focused = focused_windows
+                .windows
+                .iter()
+                .any(|(_, window)| window.focused);
+            update_mode = focused_windows.config.update_mode(focused);
         }
 
         // The update mode could have been changed, so we need to redraw and force an update
