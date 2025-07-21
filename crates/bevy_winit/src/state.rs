@@ -113,7 +113,7 @@ struct WindowEventWriters<'w, 's> {
 #[derive(SystemParam)]
 struct FocusedWindows<'w, 's> {
     config: Res<'w, WinitSettings>,
-    windows: Query<'w, 's, (Entity, &'static Window)>,
+    windows: Query<'w, 's, &'static Window>,
 }
 
 impl<T: BufferedEvent> WinitAppRunnerState<T> {
@@ -564,10 +564,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
         }
 
         let focused_windows = self.focused_windows_state.get(self.app.world_mut());
-        let focused = focused_windows
-            .windows
-            .iter()
-            .any(|(_, window)| window.focused);
+        let focused = focused_windows.windows.iter().any(|window| window.focused);
 
         let mut update_mode = focused_windows.config.update_mode(focused);
         let mut should_update = self.should_update(update_mode);
@@ -657,7 +654,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
         if should_update {
             let focused_windows = self.focused_windows_state.get(self.app.world_mut());
             // If no windows exist, this will evaluate to `true`.
-            let all_invisible = focused_windows.windows.iter().all(|w| !w.1.visible);
+            let all_invisible = focused_windows.windows.iter().all(|w| !w.visible);
 
             // Not redrawing, but the timeout elapsed.
             //
@@ -677,10 +674,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
 
             // Running the app may have changed the WinitSettings resource, so we have to re-extract it.
             let focused_windows = self.focused_windows_state.get(self.app.world_mut());
-            let focused = focused_windows
-                .windows
-                .iter()
-                .any(|(_, window)| window.focused);
+            let focused = focused_windows.windows.iter().any(|window| window.focused);
             update_mode = focused_windows.config.update_mode(focused);
         }
 
