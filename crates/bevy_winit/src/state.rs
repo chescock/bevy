@@ -92,6 +92,7 @@ struct WinitAppRunnerState<T: BufferedEvent> {
 
     event_writer_system_state: SystemState<WindowEventWriters<'static, 'static>>,
     focused_windows_state: SystemState<FocusedWindows<'static, 'static>>,
+    cursor_windows: SystemState<CursorWindows<'static, 'static>>,
 }
 
 #[derive(SystemParam)]
@@ -116,6 +117,13 @@ struct FocusedWindows<'w, 's> {
     windows: Query<'w, 's, &'static Window>,
 }
 
+#[derive(SystemParam)]
+struct CursorWindows<'w, 's> {
+    #[cfg(feature = "custom_cursor")]
+    cursor_cache: ResMut<'w, CustomCursorCache>,
+    windows: Query<'w, 's, (Entity, &'static mut PendingCursor), Changed<PendingCursor>>,
+}
+
 impl<T: BufferedEvent> WinitAppRunnerState<T> {
     fn new(mut app: App) -> Self {
         app.add_event::<T>();
@@ -124,6 +132,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
 
         let event_writer_system_state = SystemState::new(app.world_mut());
         let focused_windows_state = SystemState::new(app.world_mut());
+        let cursor_windows = SystemState::new(app.world_mut());
 
         Self {
             app,
@@ -144,6 +153,7 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
             _marker: PhantomData,
             event_writer_system_state,
             focused_windows_state,
+            cursor_windows,
         }
     }
 
@@ -888,22 +898,10 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
     }
 
     fn update_cursors(&mut self, #[cfg(feature = "custom_cursor")] event_loop: &ActiveEventLoop) {
-        #[cfg(feature = "custom_cursor")]
-        let mut windows_state: SystemState<(
-            ResMut<CustomCursorCache>,
-            Query<(Entity, &mut PendingCursor), Changed<PendingCursor>>,
-        )> = SystemState::new(self.world_mut());
-        #[cfg(feature = "custom_cursor")]
-        let (mut cursor_cache, mut windows) = windows_state.get_mut(self.world_mut());
-        #[cfg(not(feature = "custom_cursor"))]
-        let mut windows_state: SystemState<(
-            Query<(Entity, &mut PendingCursor), Changed<PendingCursor>>,
-        )> = SystemState::new(self.world_mut());
-        #[cfg(not(feature = "custom_cursor"))]
-        let (mut windows,) = windows_state.get_mut(self.world_mut());
+        let mut cursor_windows = self.cursor_windows.get_mut(self.app.world_mut());
 
         WINIT_WINDOWS.with_borrow(|winit_windows| {
-            for (entity, mut pending_cursor) in windows.iter_mut() {
+            for (entity, mut pending_cursor) in cursor_windows.windows.iter_mut() {
                 let Some(winit_window) = winit_windows.get_window(entity) else {
                     continue;
                 };
@@ -914,7 +912,8 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
                 let final_cursor: winit::window::Cursor = match pending_cursor {
                     #[cfg(feature = "custom_cursor")]
                     CursorSource::CustomCached(cache_key) => {
-                        let Some(cached_cursor) = cursor_cache.0.get(&cache_key) else {
+                        let Some(cached_cursor) = cursor_windows.cursor_cache.0.get(&cache_key)
+                        else {
                             error!("Cursor should have been cached, but was not found");
                             continue;
                         };
@@ -923,7 +922,10 @@ impl<T: BufferedEvent> WinitAppRunnerState<T> {
                     #[cfg(feature = "custom_cursor")]
                     CursorSource::Custom((cache_key, cursor)) => {
                         let custom_cursor = event_loop.create_custom_cursor(cursor);
-                        cursor_cache.0.insert(cache_key, custom_cursor.clone());
+                        cursor_windows
+                            .cursor_cache
+                            .0
+                            .insert(cache_key, custom_cursor.clone());
                         custom_cursor.into()
                     }
                     CursorSource::System(system_cursor) => system_cursor.into(),
