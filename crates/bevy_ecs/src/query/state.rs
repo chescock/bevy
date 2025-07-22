@@ -66,7 +66,6 @@ pub(super) union StorageId {
 // make `QueryState::as_transmuted_state` unsound if not done with care.
 pub struct QueryState<D: QueryData, F: QueryFilter = ()> {
     world_id: WorldId,
-    pub(crate) archetype_generation: ArchetypeGeneration,
     /// Metadata about the [`Table`](crate::storage::Table)s matched by this query.
     pub(crate) matched_tables: FixedBitSet,
     /// Metadata about the [`Archetype`]s matched by this query.
@@ -79,6 +78,10 @@ pub struct QueryState<D: QueryData, F: QueryFilter = ()> {
     pub(crate) component_access: FilteredAccess<ComponentId>,
     // NOTE: we maintain both a bitset and a vec because iterating the vec is faster
     pub(super) matched_storage_ids: Vec<StorageId>,
+    // Put `archetype_generation` and `is_dense` next to each other to reduce size.
+    // We use `#[repr(C)]`, and these are the only fields with alignment less than `usize`,
+    // so if they are not declared next to each other then we'll need extra padding.
+    pub(crate) archetype_generation: ArchetypeGeneration,
     // Represents whether this query iteration is dense or not. When this is true
     // `matched_storage_ids` stores `TableId`s, otherwise it stores `ArchetypeId`s.
     pub(super) is_dense: bool,
