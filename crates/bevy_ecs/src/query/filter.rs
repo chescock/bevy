@@ -2,7 +2,7 @@ use crate::{
     archetype::Archetype,
     component::{Component, ComponentId, Components, StorageType, Tick},
     entity::{Entities, Entity},
-    query::{DebugCheckedUnwrap, FilteredAccess, StorageSwitch, WorldQuery},
+    query::{DebugCheckedUnwrap, EntityOnlyWorldQuery, FilteredAccess, StorageSwitch, WorldQuery},
     storage::{ComponentSparseSet, Table, TableRow},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -200,6 +200,9 @@ unsafe impl<T: Component> WorldQuery for With<T> {
     }
 }
 
+// SAFETY: Performs no access
+unsafe impl<T: Component> EntityOnlyWorldQuery for With<T> {}
+
 // SAFETY: WorldQuery impl performs no access at all
 unsafe impl<T: Component> QueryFilter for With<T> {
     const IS_ARCHETYPAL: bool = true;
@@ -300,6 +303,9 @@ unsafe impl<T: Component> WorldQuery for Without<T> {
         !set_contains_id(id)
     }
 }
+
+// SAFETY: Performs no access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Without<T> {}
 
 // SAFETY: WorldQuery impl performs no access at all
 unsafe impl<T: Component> QueryFilter for Without<T> {
@@ -480,6 +486,9 @@ macro_rules! impl_or_query_filter {
             }
         }
 
+        // SAFETY: This only registers access from its subqueries, and they only register access to components on the current entity
+        unsafe impl<$($filter: QueryFilter + EntityOnlyWorldQuery),*> EntityOnlyWorldQuery for Or<($($filter,)*)> {}
+
         #[expect(
             clippy::allow_attributes,
             reason = "This is a tuple-related macro; as such the lints below may not always apply."
@@ -612,6 +621,9 @@ unsafe impl<T: Component> WorldQuery for Allows<T> {
         true
     }
 }
+
+// SAFETY: Performs no access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Allows<T> {}
 
 // SAFETY: WorldQuery impl performs no access at all
 unsafe impl<T: Component> QueryFilter for Allows<T> {
@@ -815,6 +827,9 @@ unsafe impl<T: Component> WorldQuery for Added<T> {
         set_contains_id(id)
     }
 }
+
+// SAFETY: Only performs component access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Added<T> {}
 
 // SAFETY: WorldQuery impl performs only read access on ticks
 unsafe impl<T: Component> QueryFilter for Added<T> {
@@ -1043,6 +1058,9 @@ unsafe impl<T: Component> WorldQuery for Changed<T> {
     }
 }
 
+// SAFETY: Only performs component access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Changed<T> {}
+
 // SAFETY: WorldQuery impl performs only read access on ticks
 unsafe impl<T: Component> QueryFilter for Changed<T> {
     const IS_ARCHETYPAL: bool = false;
@@ -1197,6 +1215,9 @@ unsafe impl WorldQuery for Spawned {
         true
     }
 }
+
+// SAFETY: Only performs component access
+unsafe impl EntityOnlyWorldQuery for Spawned {}
 
 // SAFETY: WorldQuery impl accesses no components or component ticks
 unsafe impl QueryFilter for Spawned {

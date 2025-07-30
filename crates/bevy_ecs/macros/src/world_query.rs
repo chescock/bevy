@@ -172,5 +172,13 @@ pub(crate) fn world_query_impl(
                 true #(&& <#field_types>::matches_component_set(&state.#named_field_idents, _set_contains_id))*
             }
         }
+
+        // SAFETY: This only registers access from its subqueries, and they only register access to components on the current entity
+        unsafe impl #user_impl_generics #path::query::EntityOnlyWorldQuery
+        for #struct_name #user_ty_generics #user_where_clauses
+        // Make these HRTBs with an unused lifetime parameter to allow trivial constraints
+        // See https://github.com/rust-lang/rust/issues/48214
+        where #(for<'__a> #field_types: #path::query::EntityOnlyWorldQuery,)*
+        {}
     }
 }

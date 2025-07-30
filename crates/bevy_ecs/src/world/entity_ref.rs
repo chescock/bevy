@@ -16,7 +16,9 @@ use crate::{
     event::EntityEvent,
     lifecycle::{DESPAWN, REMOVE, REPLACE},
     observer::Observer,
-    query::{Access, DebugCheckedUnwrap, ReadOnlyQueryData, ReleaseStateQueryData},
+    query::{
+        Access, DebugCheckedUnwrap, EntityOnlyWorldQuery, ReadOnlyQueryData, ReleaseStateQueryData,
+    },
     relationship::RelationshipHookMode,
     resource::Resource,
     storage::{SparseSets, Table},
@@ -280,18 +282,21 @@ impl<'w> EntityRef<'w> {
     /// # Panics
     ///
     /// If the entity does not have the components required by the query `Q`.
-    pub fn components<Q: ReadOnlyQueryData + ReleaseStateQueryData>(&self) -> Q::Item<'w, 'static> {
+    pub fn components<Q: ReadOnlyQueryData + ReleaseStateQueryData + EntityOnlyWorldQuery>(
+        &self,
+    ) -> Q::Item<'w, 'static> {
         self.get_components::<Q>()
             .expect("Query does not match the current entity")
     }
 
     /// Returns read-only components for the current entity that match the query `Q`,
     /// or `None` if the entity does not have the components required by the query `Q`.
-    pub fn get_components<Q: ReadOnlyQueryData + ReleaseStateQueryData>(
+    pub fn get_components<Q: ReadOnlyQueryData + ReleaseStateQueryData + EntityOnlyWorldQuery>(
         &self,
     ) -> Option<Q::Item<'w, 'static>> {
         // SAFETY:
-        // - We have read-only access to all components of this entity.
+        // - We have read-only access to all components of this entity,
+        //   and `EntityOnlyWorldQuery` ensures the query does not access components outside of this entity
         // - The query is read-only, and read-only references cannot have conflicts.
         unsafe { self.cell.get_components::<Q>() }
     }
@@ -551,13 +556,15 @@ impl<'w> EntityMut<'w> {
     /// # Panics
     ///
     /// If the entity does not have the components required by the query `Q`.
-    pub fn components<Q: ReadOnlyQueryData + ReleaseStateQueryData>(&self) -> Q::Item<'_, 'static> {
+    pub fn components<Q: ReadOnlyQueryData + ReleaseStateQueryData + EntityOnlyWorldQuery>(
+        &self,
+    ) -> Q::Item<'_, 'static> {
         self.as_readonly().components::<Q>()
     }
 
     /// Returns read-only components for the current entity that match the query `Q`,
     /// or `None` if the entity does not have the components required by the query `Q`.
-    pub fn get_components<Q: ReadOnlyQueryData + ReleaseStateQueryData>(
+    pub fn get_components<Q: ReadOnlyQueryData + ReleaseStateQueryData + EntityOnlyWorldQuery>(
         &self,
     ) -> Option<Q::Item<'_, 'static>> {
         self.as_readonly().get_components::<Q>()
@@ -591,7 +598,7 @@ impl<'w> EntityMut<'w> {
     /// # Safety
     /// It is the caller's responsibility to ensure that
     /// the `QueryData` does not provide aliasing mutable references to the same component.
-    pub unsafe fn get_components_mut_unchecked<Q: ReleaseStateQueryData>(
+    pub unsafe fn get_components_mut_unchecked<Q: ReleaseStateQueryData + EntityOnlyWorldQuery>(
         &mut self,
     ) -> Option<Q::Item<'_, 'static>> {
         // SAFETY: Caller the `QueryData` does not provide aliasing mutable references to the same component
@@ -626,11 +633,12 @@ impl<'w> EntityMut<'w> {
     /// # Safety
     /// It is the caller's responsibility to ensure that
     /// the `QueryData` does not provide aliasing mutable references to the same component.
-    pub unsafe fn into_components_mut_unchecked<Q: ReleaseStateQueryData>(
+    pub unsafe fn into_components_mut_unchecked<Q: ReleaseStateQueryData + EntityOnlyWorldQuery>(
         self,
     ) -> Option<Q::Item<'w, 'static>> {
         // SAFETY:
-        // - We have mutable access to all components of this entity.
+        // - We have mutable access to all components of this entity,
+        //   and `EntityOnlyWorldQuery` ensures the query does not access components outside of this entity
         // - Caller asserts the `QueryData` does not provide aliasing mutable references to the same component
         unsafe { self.cell.get_components::<Q>() }
     }
@@ -1390,7 +1398,8 @@ impl<'w> EntityWorldMut<'w> {
     /// has been despawned while this `EntityWorldMut` is still alive.
     #[inline]
     pub fn components<Q: ReadOnlyQueryData + ReleaseStateQueryData>(&self) -> Q::Item<'_, 'static> {
-        self.as_readonly().components::<Q>()
+        self.get_components::<Q>()
+            .expect("Query does not match the current entity")
     }
 
     /// Returns read-only components for the current entity that match the query `Q`,
@@ -1403,7 +1412,10 @@ impl<'w> EntityWorldMut<'w> {
     pub fn get_components<Q: ReadOnlyQueryData + ReleaseStateQueryData>(
         &self,
     ) -> Option<Q::Item<'_, 'static>> {
-        self.as_readonly().get_components::<Q>()
+        // SAFETY:
+        // - We have read-only access to the entire world.
+        // - The query is read-only, and read-only references cannot have conflicts.
+        unsafe { self.as_unsafe_entity_cell_readonly().get_components::<Q>() }
     }
 
     /// Returns components for the current entity that match the query `Q`,
@@ -1437,8 +1449,10 @@ impl<'w> EntityWorldMut<'w> {
     pub unsafe fn get_components_mut_unchecked<Q: ReleaseStateQueryData>(
         &mut self,
     ) -> Option<Q::Item<'_, 'static>> {
-        // SAFETY: Caller the `QueryData` does not provide aliasing mutable references to the same component
-        unsafe { self.as_mutable().into_components_mut_unchecked::<Q>() }
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - Caller asserts the `QueryData` does not provide aliasing mutable references to the same component
+        unsafe { self.as_unsafe_entity_cell().get_components::<Q>() }
     }
 
     /// Consumes self and returns components for the current entity that match the query `Q` for the world lifetime `'w`,
@@ -1472,8 +1486,10 @@ impl<'w> EntityWorldMut<'w> {
     pub unsafe fn into_components_mut_unchecked<Q: ReleaseStateQueryData>(
         self,
     ) -> Option<Q::Item<'w, 'static>> {
-        // SAFETY: Caller the `QueryData` does not provide aliasing mutable references to the same component
-        unsafe { self.into_mutable().into_components_mut_unchecked::<Q>() }
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - Caller asserts the `QueryData` does not provide aliasing mutable references to the same component
+        unsafe { self.into_unsafe_entity_cell().get_components::<Q>() }
     }
 
     /// Consumes `self` and gets access to the component of type `T` with

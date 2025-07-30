@@ -4,7 +4,7 @@ use crate::{
     change_detection::{MaybeLocation, Ticks, TicksMut},
     component::{Component, ComponentId, Components, Mutable, StorageType, Tick},
     entity::{Entities, Entity, EntityLocation},
-    query::{Access, DebugCheckedUnwrap, FilteredAccess, WorldQuery},
+    query::{Access, DebugCheckedUnwrap, EntityOnlyWorldQuery, FilteredAccess, WorldQuery},
     storage::{ComponentSparseSet, Table, TableRow},
     world::{
         unsafe_world_cell::UnsafeWorldCell, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept,
@@ -407,6 +407,9 @@ unsafe impl WorldQuery for Entity {
     }
 }
 
+// SAFETY: Performs no access
+unsafe impl EntityOnlyWorldQuery for Entity {}
+
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl QueryData for Entity {
     const IS_READ_ONLY: bool = true;
@@ -496,6 +499,9 @@ unsafe impl WorldQuery for EntityLocation {
         true
     }
 }
+
+// SAFETY: Performs no access
+unsafe impl EntityOnlyWorldQuery for EntityLocation {}
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl QueryData for EntityLocation {
@@ -658,6 +664,9 @@ unsafe impl WorldQuery for SpawnDetails {
     }
 }
 
+// SAFETY: Performs no access
+unsafe impl EntityOnlyWorldQuery for SpawnDetails {}
+
 // SAFETY:
 // No components are accessed.
 // Is its own ReadOnlyQueryData.
@@ -779,6 +788,9 @@ unsafe impl<'a> WorldQuery for EntityRef<'a> {
     }
 }
 
+// SAFETY: Only performs component access
+unsafe impl EntityOnlyWorldQuery for EntityRef<'_> {}
+
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl<'a> QueryData for EntityRef<'a> {
     const IS_READ_ONLY: bool = true;
@@ -881,6 +893,9 @@ unsafe impl<'a> WorldQuery for EntityMut<'a> {
         true
     }
 }
+
+// SAFETY: Only performs component access
+unsafe impl EntityOnlyWorldQuery for EntityMut<'_> {}
 
 /// SAFETY: access of `EntityRef` is a subset of `EntityMut`
 unsafe impl<'a> QueryData for EntityMut<'a> {
@@ -986,6 +1001,10 @@ unsafe impl WorldQuery for FilteredEntityRef<'_, '_> {
         true
     }
 }
+
+// SAFETY: When constructed with `init_state`, performs no access
+// It may receive other access in `provide_extra_access`, but that's allowed
+unsafe impl EntityOnlyWorldQuery for FilteredEntityRef<'_, '_> {}
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl QueryData for FilteredEntityRef<'_, '_> {
@@ -1107,6 +1126,10 @@ unsafe impl WorldQuery for FilteredEntityMut<'_, '_> {
         true
     }
 }
+
+// SAFETY: When constructed with `init_state`, performs no access
+// It may receive other access in `provide_extra_access`, but that's allowed
+unsafe impl EntityOnlyWorldQuery for FilteredEntityMut<'_, '_> {}
 
 /// SAFETY: access of `FilteredEntityRef` is a subset of `FilteredEntityMut`
 unsafe impl<'a, 'b> QueryData for FilteredEntityMut<'a, 'b> {
@@ -1239,6 +1262,9 @@ where
     }
 }
 
+// SAFETY: Only performs component access
+unsafe impl<B: Bundle> EntityOnlyWorldQuery for EntityRefExcept<'_, '_, B> {}
+
 /// SAFETY: `Self` is the same as `Self::ReadOnly`.
 unsafe impl<'a, 'b, B> QueryData for EntityRefExcept<'a, 'b, B>
 where
@@ -1355,6 +1381,9 @@ where
     }
 }
 
+// SAFETY: Only performs component access
+unsafe impl<B: Bundle> EntityOnlyWorldQuery for EntityMutExcept<'_, '_, B> {}
+
 /// SAFETY: All accesses that `EntityRefExcept` provides are also accesses that
 /// `EntityMutExcept` provides.
 unsafe impl<'a, 'b, B> QueryData for EntityMutExcept<'a, 'b, B>
@@ -1441,6 +1470,9 @@ unsafe impl WorldQuery for &Archetype {
         true
     }
 }
+
+// SAFETY: Performs no access
+unsafe impl EntityOnlyWorldQuery for &Archetype {}
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl QueryData for &Archetype {
@@ -1596,6 +1628,9 @@ unsafe impl<T: Component> WorldQuery for &T {
         set_contains_id(state)
     }
 }
+
+// SAFETY: Only performs component access
+unsafe impl<T: Component> EntityOnlyWorldQuery for &T {}
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl<T: Component> QueryData for &T {
@@ -1782,6 +1817,9 @@ unsafe impl<'__w, T: Component> WorldQuery for Ref<'__w, T> {
         set_contains_id(state)
     }
 }
+
+// SAFETY: Only performs component access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Ref<'_, T> {}
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl<'__w, T: Component> QueryData for Ref<'__w, T> {
@@ -1992,6 +2030,9 @@ unsafe impl<'__w, T: Component> WorldQuery for &'__w mut T {
     }
 }
 
+// SAFETY: Only performs component access
+unsafe impl<T: Component> EntityOnlyWorldQuery for &mut T {}
+
 /// SAFETY: access of `&T` is a subset of `&mut T`
 unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for &'__w mut T {
     const IS_READ_ONLY: bool = false;
@@ -2144,6 +2185,9 @@ unsafe impl<'__w, T: Component> WorldQuery for Mut<'__w, T> {
     }
 }
 
+// SAFETY: Only performs component access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Mut<'_, T> {}
+
 // SAFETY: access of `Ref<T>` is a subset of `Mut<T>`
 unsafe impl<'__w, T: Component<Mutability = Mutable>> QueryData for Mut<'__w, T> {
     const IS_READ_ONLY: bool = false;
@@ -2284,6 +2328,9 @@ unsafe impl<T: WorldQuery> WorldQuery for Option<T> {
         true
     }
 }
+
+// SAFETY: This only registers access from its subquery, and it only registers access to components on the current entity
+unsafe impl<T: EntityOnlyWorldQuery> EntityOnlyWorldQuery for Option<T> {}
 
 // SAFETY: defers to soundness of `T: WorldQuery` impl
 unsafe impl<T: QueryData> QueryData for Option<T> {
@@ -2461,6 +2508,9 @@ unsafe impl<T: Component> WorldQuery for Has<T> {
         true
     }
 }
+
+// SAFETY: Performs no access
+unsafe impl<T: Component> EntityOnlyWorldQuery for Has<T> {}
 
 /// SAFETY: `Self` is the same as `Self::ReadOnly`
 unsafe impl<T: Component> QueryData for Has<T> {
@@ -2690,6 +2740,9 @@ macro_rules! impl_anytuple_fetch {
             }
         }
 
+        // SAFETY: This only registers access from its subqueries, and they only register access to components on the current entity
+        unsafe impl<$($name: EntityOnlyWorldQuery),*> EntityOnlyWorldQuery for AnyOf<($($name,)*)> {}
+
         #[expect(
             clippy::allow_attributes,
             reason = "This is a tuple-related macro; as such the lints below may not always apply."
@@ -2831,6 +2884,9 @@ unsafe impl<D: QueryData> WorldQuery for NopWorldQuery<D> {
     }
 }
 
+// SAFETY: This only registers access from its subquery, and it only registers access to components on the current entity
+unsafe impl<D: QueryData + EntityOnlyWorldQuery> EntityOnlyWorldQuery for NopWorldQuery<D> {}
+
 /// SAFETY: `Self::ReadOnly` is `Self`
 unsafe impl<D: QueryData> QueryData for NopWorldQuery<D> {
     const IS_READ_ONLY: bool = true;
@@ -2912,6 +2968,9 @@ unsafe impl<T: ?Sized> WorldQuery for PhantomData<T> {
         true
     }
 }
+
+// SAFETY: Performs no access
+unsafe impl<T: ?Sized> EntityOnlyWorldQuery for PhantomData<T> {}
 
 /// SAFETY: `Self::ReadOnly` is `Self`
 unsafe impl<T: ?Sized> QueryData for PhantomData<T> {

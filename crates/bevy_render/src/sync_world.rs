@@ -281,7 +281,10 @@ mod render_entities_world_query_impls {
         archetype::Archetype,
         component::{ComponentId, Components, Tick},
         entity::Entity,
-        query::{FilteredAccess, QueryData, ReadOnlyQueryData, ReleaseStateQueryData, WorldQuery},
+        query::{
+            EntityOnlyWorldQuery, FilteredAccess, QueryData, ReadOnlyQueryData,
+            ReleaseStateQueryData, WorldQuery,
+        },
         storage::{Table, TableRow},
         world::{unsafe_world_cell::UnsafeWorldCell, World},
     };
@@ -358,6 +361,9 @@ mod render_entities_world_query_impls {
             <&RenderEntity as WorldQuery>::matches_component_set(&state, set_contains_id)
         }
     }
+
+    // SAFETY: Defers completely to `&RenderEntity` implementation, which is `EntityOnlyWorldQuery`
+    unsafe impl EntityOnlyWorldQuery for RenderEntity {}
 
     // SAFETY: Component access of Self::ReadOnly is a subset of Self.
     // Self::ReadOnly matches exactly the same archetypes/tables as Self.
@@ -467,6 +473,9 @@ mod render_entities_world_query_impls {
             <&MainEntity as WorldQuery>::matches_component_set(&state, set_contains_id)
         }
     }
+
+    // SAFETY: Defers completely to `&MainEntity` implementation, which is `EntityOnlyWorldQuery`
+    unsafe impl EntityOnlyWorldQuery for MainEntity {}
 
     // SAFETY: Component access of Self::ReadOnly is a subset of Self.
     // Self::ReadOnly matches exactly the same archetypes/tables as Self.
