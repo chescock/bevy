@@ -2,7 +2,7 @@
 
 use crate::{
     entity::Entity,
-    query::{ReadOnlyQueryData, ReleaseStateQueryData},
+    query::{EntityOnlyWorldQuery, ReadOnlyQueryData, ReleaseStateQueryData},
     relationship::Relationship,
 };
 
@@ -24,7 +24,9 @@ use crate::{
 /// [specify the direction]: crate::event::EntityEvent::Traversal
 /// [event propagation]: crate::observer::On::propagate
 /// [observers]: crate::observer::Observer
-pub trait Traversal<D: ?Sized>: ReadOnlyQueryData + ReleaseStateQueryData {
+pub trait Traversal<D: ?Sized>:
+    ReadOnlyQueryData + ReleaseStateQueryData + EntityOnlyWorldQuery
+{
     /// Returns the next entity to visit.
     fn traverse(item: Self::Item<'_, '_>, data: &D) -> Option<Entity>;
 }

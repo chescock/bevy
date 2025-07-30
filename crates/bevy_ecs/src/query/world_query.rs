@@ -132,6 +132,20 @@ pub unsafe trait WorldQuery {
     ) -> bool;
 }
 
+/// A [`WorldQuery`] that only accesses components from the current entity.
+///
+/// This is used to prevent [`EntityRef::get_components`] and related methods from being used with queries that perform resource access.
+///
+/// # Safety
+///
+/// `WorldQuery::update_component_access` may only register access to components on the current entity, not to resources.
+/// As a consequence, [`WorldQuery::init_fetch`], [`QueryData::fetch`], and [`QueryFilter::filter_fetch`] must only access components on the current entity.
+///
+/// [`EntityRef::get_components`]: crate::world::EntityRef::get_components
+/// [`QueryData::fetch`]: crate::query::QueryData::fetch
+/// [`QueryFilter::filter_fetch`]: crate::query::QueryFilter::filter_fetch
+pub unsafe trait EntityOnlyWorldQuery: WorldQuery {}
+
 macro_rules! impl_tuple_world_query {
     ($(#[$meta:meta])* $(($name: ident, $state: ident)),*) => {
 
@@ -216,6 +230,9 @@ macro_rules! impl_tuple_world_query {
                 true $(&& $name::matches_component_set($name, set_contains_id))*
             }
         }
+
+        // SAFETY: This only registers access from its subqueries, and they only register access to components on the current entity
+        unsafe impl<$($name: EntityOnlyWorldQuery),*> EntityOnlyWorldQuery for ($($name,)*) {}
     };
 }
 
