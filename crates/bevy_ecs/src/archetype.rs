@@ -28,7 +28,10 @@ use crate::{
     storage::{ImmutableSparseSet, SparseArray, SparseSet, TableId, TableRow},
 };
 use alloc::{boxed::Box, vec::Vec};
-use bevy_platform::collections::{hash_map::Entry, HashMap};
+use bevy_platform::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
 use core::{
     hash::Hash,
     ops::{Index, IndexMut, RangeFrom},
@@ -131,10 +134,41 @@ pub(crate) enum ComponentStatus {
     Existing,
 }
 
+/// A set of query observers that observe a specific archetype.
+pub(crate) struct ArchetypeObservers {
+    add: Vec<Entity>,
+    insert: Vec<Entity>,
+    replace: Vec<Entity>,
+    remove: Vec<Entity>,
+}
+
+/// A set of query observers that should trigger on a specific archetype edge.
+pub(crate) struct ArchetypeEdgeObservers {
+    /// The set of query observers on the source archetype.
+    /// If this does not match the current value, then this value is stale and should be recalculated.
+    source: Arc<ArchetypeObservers>,
+    /// The set of query observers on the target archetype.
+    /// If this does not match the current value, then this value is stale and should be recalculated.
+    target: Arc<ArchetypeObservers>,
+    add: Vec<Entity>,
+    insert: Vec<Entity>,
+    replace: Vec<Entity>,
+    remove: Vec<Entity>,
+}
+
+pub(crate) struct ArchetypeWithEdgeObservers {
+    /// The target archetype after the bundle is inserted into the source archetype.
+    archetype_id: ArchetypeId,
+    /// The cached set of observers that will trigger on this edge.
+    observers: Arc<ArchetypeEdgeObservers>,
+}
+
 /// Used in [`Edges`] to cache the result of inserting a bundle into the source archetype.
 pub(crate) struct ArchetypeAfterBundleInsert {
     /// The target archetype after the bundle is inserted into the source archetype.
     pub archetype_id: ArchetypeId,
+    /// The cached set of observers that will trigger on this edge.
+    pub observers: Arc<ArchetypeEdgeObservers>,
     /// For each component iterated in the same order as the source [`Bundle`](crate::bundle::Bundle),
     /// indicate if the component is newly added to the target archetype or if it already existed.
     pub bundle_status: Vec<ComponentStatus>,
@@ -210,8 +244,8 @@ impl BundleComponentStatus for SpawnBundleStatus {
 #[derive(Default)]
 pub struct Edges {
     insert_bundle: SparseArray<BundleId, ArchetypeAfterBundleInsert>,
-    remove_bundle: SparseArray<BundleId, Option<ArchetypeId>>,
-    take_bundle: SparseArray<BundleId, Option<ArchetypeId>>,
+    remove_bundle: SparseArray<BundleId, Option<ArchetypeWithEdgeObservers>>,
+    take_bundle: SparseArray<BundleId, Option<ArchetypeWithEdgeObservers>>,
 }
 
 impl Edges {
@@ -251,6 +285,7 @@ impl Edges {
             bundle_id,
             ArchetypeAfterBundleInsert {
                 archetype_id,
+                observers: todo!(),
                 bundle_status,
                 required_components,
                 added,
@@ -271,8 +306,8 @@ impl Edges {
     pub fn get_archetype_after_bundle_remove(
         &self,
         bundle_id: BundleId,
-    ) -> Option<Option<ArchetypeId>> {
-        self.remove_bundle.get(bundle_id).cloned()
+    ) -> Option<&Option<ArchetypeWithEdgeObservers>> {
+        self.remove_bundle.get(bundle_id)
     }
 
     /// Caches the target archetype when removing a bundle from the source archetype.
@@ -280,9 +315,9 @@ impl Edges {
     pub(crate) fn cache_archetype_after_bundle_remove(
         &mut self,
         bundle_id: BundleId,
-        archetype_id: Option<ArchetypeId>,
+        edge: Option<ArchetypeWithEdgeObservers>,
     ) {
-        self.remove_bundle.insert(bundle_id, archetype_id);
+        self.remove_bundle.insert(bundle_id, edge);
     }
 
     /// Checks the cache for the target archetype when taking a bundle from the
@@ -300,8 +335,8 @@ impl Edges {
     pub fn get_archetype_after_bundle_take(
         &self,
         bundle_id: BundleId,
-    ) -> Option<Option<ArchetypeId>> {
-        self.take_bundle.get(bundle_id).cloned()
+    ) -> Option<&Option<ArchetypeWithEdgeObservers>> {
+        self.take_bundle.get(bundle_id)
     }
 
     /// Caches the target archetype when taking a bundle from the source archetype.
@@ -312,9 +347,9 @@ impl Edges {
     pub(crate) fn cache_archetype_after_bundle_take(
         &mut self,
         bundle_id: BundleId,
-        archetype_id: Option<ArchetypeId>,
+        edge: Option<ArchetypeWithEdgeObservers>,
     ) {
-        self.take_bundle.insert(bundle_id, archetype_id);
+        self.take_bundle.insert(bundle_id, edge);
     }
 }
 
