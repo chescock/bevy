@@ -156,6 +156,7 @@ pub(crate) struct ArchetypeEdgeObservers {
     remove: Vec<Entity>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ArchetypeWithEdgeObservers {
     /// The target archetype after the bundle is inserted into the source archetype.
     pub archetype_id: ArchetypeId,
@@ -316,8 +317,8 @@ impl Edges {
         &mut self,
         bundle_id: BundleId,
         edge: Option<ArchetypeWithEdgeObservers>,
-    ) {
-        self.remove_bundle.insert(bundle_id, edge);
+    ) -> &mut Option<ArchetypeWithEdgeObservers> {
+        self.remove_bundle.insert(bundle_id, edge)
     }
 
     /// Checks the cache for the target archetype when taking a bundle from the
@@ -348,8 +349,8 @@ impl Edges {
         &mut self,
         bundle_id: BundleId,
         edge: Option<ArchetypeWithEdgeObservers>,
-    ) {
-        self.take_bundle.insert(bundle_id, edge);
+    ) -> &mut Option<ArchetypeWithEdgeObservers> {
+        self.take_bundle.insert(bundle_id, edge)
     }
 }
 

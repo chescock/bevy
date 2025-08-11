@@ -392,26 +392,30 @@ impl BundleInfo {
                 next_table_components,
                 next_sparse_set_components,
             );
+
             (
-                Some(ArchetypeWithEdgeObservers {
+                &Some(ArchetypeWithEdgeObservers {
                     archetype_id: new_archetype_id,
                     observers: todo!(),
                 }),
                 is_new_created,
             )
         };
+
+        let result = result.clone();
         let current_archetype = &mut archetypes[archetype_id];
         // Cache the result in an edge.
-        if intersection {
+        let result = if intersection {
             current_archetype
                 .edges_mut()
-                .cache_archetype_after_bundle_remove(self.id(), result);
+                .cache_archetype_after_bundle_remove(self.id(), result)
         } else {
             current_archetype
                 .edges_mut()
-                .cache_archetype_after_bundle_take(self.id(), result);
-        }
-        (result, is_new_created)
+                .cache_archetype_after_bundle_take(self.id(), result)
+        };
+
+        (result.as_ref(), is_new_created)
     }
 }
 
