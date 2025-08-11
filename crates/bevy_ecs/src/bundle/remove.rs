@@ -3,7 +3,7 @@ use bevy_ptr::ConstNonNull;
 use core::ptr::NonNull;
 
 use crate::{
-    archetype::{Archetype, ArchetypeCreated, ArchetypeId, Archetypes},
+    archetype::{Archetype, ArchetypeCreated, ArchetypeId, ArchetypeWithEdgeObservers, Archetypes},
     bundle::{Bundle, BundleId, BundleInfo},
     change_detection::MaybeLocation,
     component::{ComponentId, Components, ComponentsRegistrator, StorageType},
@@ -73,7 +73,7 @@ impl<'w> BundleRemover<'w> {
                 !require_all,
             )
         };
-        let new_archetype_id = new_archetype_id?;
+        let new_archetype_id = new_archetype_id?.archetype_id;
 
         if new_archetype_id == archetype_id {
             return None;
@@ -311,15 +311,15 @@ impl BundleInfo {
     ///
     /// # Safety
     /// `archetype_id` must exist and components in `bundle_info` must exist
-    pub(crate) unsafe fn remove_bundle_from_archetype(
+    pub(crate) unsafe fn remove_bundle_from_archetype<'a>(
         &self,
-        archetypes: &mut Archetypes,
+        archetypes: &'a mut Archetypes,
         storages: &mut Storages,
         components: &Components,
         observers: &Observers,
         archetype_id: ArchetypeId,
         intersection: bool,
-    ) -> (Option<ArchetypeId>, bool) {
+    ) -> (Option<&'a ArchetypeWithEdgeObservers>, bool) {
         // Check the archetype graph to see if the bundle has been
         // removed from this archetype in the past.
         let archetype_after_remove_result = {
@@ -392,7 +392,13 @@ impl BundleInfo {
                 next_table_components,
                 next_sparse_set_components,
             );
-            (Some(new_archetype_id), is_new_created)
+            (
+                Some(ArchetypeWithEdgeObservers {
+                    archetype_id: new_archetype_id,
+                    observers: todo!(),
+                }),
+                is_new_created,
+            )
         };
         let current_archetype = &mut archetypes[archetype_id];
         // Cache the result in an edge.

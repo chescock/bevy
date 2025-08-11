@@ -158,9 +158,9 @@ pub(crate) struct ArchetypeEdgeObservers {
 
 pub(crate) struct ArchetypeWithEdgeObservers {
     /// The target archetype after the bundle is inserted into the source archetype.
-    archetype_id: ArchetypeId,
+    pub archetype_id: ArchetypeId,
     /// The cached set of observers that will trigger on this edge.
-    observers: Arc<ArchetypeEdgeObservers>,
+    pub observers: Arc<ArchetypeEdgeObservers>,
 }
 
 /// Used in [`Edges`] to cache the result of inserting a bundle into the source archetype.
