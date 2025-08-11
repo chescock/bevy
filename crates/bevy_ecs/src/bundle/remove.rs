@@ -330,9 +330,8 @@ impl BundleInfo {
                 edges.get_archetype_after_bundle_take(self.id())
             }
         };
-        let (result, is_new_created) = if let Some(result) = archetype_after_remove_result {
-            // This bundle removal result is cached. Just return that!
-            (result, false)
+        let is_new_created = if archetype_after_remove_result.is_some() {
+            false
         } else {
             let mut next_table_components;
             let mut next_sparse_set_components;
@@ -393,29 +392,34 @@ impl BundleInfo {
                 next_sparse_set_components,
             );
 
-            (
-                &Some(ArchetypeWithEdgeObservers {
-                    archetype_id: new_archetype_id,
-                    observers: todo!(),
-                }),
-                is_new_created,
-            )
+            let result = Some(ArchetypeWithEdgeObservers {
+                archetype_id: new_archetype_id,
+                observers: todo!(),
+            });
+            let current_archetype = &mut archetypes[archetype_id];
+            // Cache the result in an edge.
+            if intersection {
+                current_archetype
+                    .edges_mut()
+                    .cache_archetype_after_bundle_remove(self.id(), result);
+            } else {
+                current_archetype
+                    .edges_mut()
+                    .cache_archetype_after_bundle_take(self.id(), result);
+            };
+            is_new_created
         };
 
-        let result = result.clone();
-        let current_archetype = &mut archetypes[archetype_id];
-        // Cache the result in an edge.
+        // Do this lookup again to work around a borrow checker limitation
+        // We can `unwrap()` the result because we just inserted it if it didn't exist
+        let edges = archetypes[archetype_id].edges();
         let result = if intersection {
-            current_archetype
-                .edges_mut()
-                .cache_archetype_after_bundle_remove(self.id(), result)
+            edges.get_archetype_after_bundle_remove(self.id())
         } else {
-            current_archetype
-                .edges_mut()
-                .cache_archetype_after_bundle_take(self.id(), result)
+            edges.get_archetype_after_bundle_take(self.id())
         };
 
-        (result.as_ref(), is_new_created)
+        (result.unwrap().as_ref(), is_new_created)
     }
 }
 
