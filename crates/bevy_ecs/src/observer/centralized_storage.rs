@@ -83,6 +83,14 @@ impl Observers {
         observers: &ArchetypeEdgeObservers,
         caller: MaybeLocation,
     ) {
+        // TODO: Make this take iterators instead of the edge
+        // for spawn/despawn, we get them from the observer set instead of the edge
+        // this means we need to clone the runner in a lot of places!
+        // which is fine, since it's a fn pointer and we're just doing a fat pointer manually
+        // ... at which point, give that type a name? and move this method there instead of here or world?
+        // we're just planning a `for` loop
+        //
+        // `observer.invoke(world.reborrow(), INSERT, caller);`, right?
         todo!()
     }
 
