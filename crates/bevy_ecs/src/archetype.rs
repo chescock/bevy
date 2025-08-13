@@ -143,7 +143,7 @@ pub(crate) struct ArchetypeObservers {
 }
 
 /// A set of query observers that should trigger on a specific archetype edge.
-pub(crate) struct ArchetypeEdgeObservers {
+pub struct ArchetypeEdgeObservers {
     /// The set of query observers on the source archetype.
     /// If this does not match the current value, then this value is stale and should be recalculated.
     pub(crate) source: Arc<ArchetypeObservers>,
@@ -157,7 +157,7 @@ pub(crate) struct ArchetypeEdgeObservers {
 }
 
 #[derive(Clone)]
-pub(crate) struct ArchetypeWithEdgeObservers {
+pub struct ArchetypeWithEdgeObservers {
     /// The target archetype after the bundle is inserted into the source archetype.
     pub archetype_id: ArchetypeId,
     /// The cached set of observers that will trigger on this edge.

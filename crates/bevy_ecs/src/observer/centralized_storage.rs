@@ -9,10 +9,10 @@
 //!     - These are split by target type, in order to allow for different lookup strategies.
 //!     - [`CachedComponentObservers`] is one of these maps, which contains observers that are specifically targeted at a component.
 
-use bevy_platform::collections::HashMap;
+use bevy_platform::{collections::HashMap, sync::Arc};
 
 use crate::{
-    archetype::ArchetypeFlags,
+    archetype::{ArchetypeEdgeObservers, ArchetypeFlags, ArchetypeId, Archetypes},
     change_detection::MaybeLocation,
     component::ComponentId,
     entity::EntityHashMap,
@@ -182,6 +182,15 @@ impl Observers {
         if self.despawn.component_observers.contains_key(&component_id) {
             flags.insert(ArchetypeFlags::ON_DESPAWN_OBSERVER);
         }
+    }
+
+    pub(crate) fn get_edge_observers(
+        &self,
+        archetypes: &Archetypes,
+        source: ArchetypeId,
+        target: ArchetypeId,
+    ) -> Arc<ArchetypeEdgeObservers> {
+        todo!()
     }
 }
 

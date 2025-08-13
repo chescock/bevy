@@ -419,7 +419,7 @@ impl BundleInfo {
 
         let result = Some(ArchetypeWithEdgeObservers {
             archetype_id: new_archetype_id,
-            observers: todo!(),
+            observers: observers.get_edge_observers(archetypes, archetype_id, new_archetype_id),
         });
 
         let current_archetype = &mut archetypes[archetype_id];
