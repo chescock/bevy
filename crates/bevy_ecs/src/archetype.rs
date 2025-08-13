@@ -277,6 +277,7 @@ impl Edges {
         &mut self,
         bundle_id: BundleId,
         archetype_id: ArchetypeId,
+        observers: Arc<ArchetypeEdgeObservers>,
         bundle_status: Vec<ComponentStatus>,
         required_components: Vec<RequiredComponentConstructor>,
         added: Vec<ComponentId>,
@@ -286,7 +287,7 @@ impl Edges {
             bundle_id,
             ArchetypeAfterBundleInsert {
                 archetype_id,
-                observers: todo!(),
+                observers,
                 bundle_status,
                 required_components,
                 added,

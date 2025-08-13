@@ -473,11 +473,14 @@ impl BundleInfo {
         }
 
         if new_table_components.is_empty() && new_sparse_set_components.is_empty() {
+            let observers = observers.get_edge_observers(archetypes, archetype_id, archetype_id);
+            let current_archetype = &mut archetypes[archetype_id];
             let edges = current_archetype.edges_mut();
             // The archetype does not change when we insert this bundle.
             edges.cache_archetype_after_bundle_insert(
                 self.id,
                 archetype_id,
+                observers,
                 bundle_status,
                 added_required_components,
                 added,
@@ -527,12 +530,16 @@ impl BundleInfo {
                 sparse_set_components,
             );
 
+            let observers =
+                observers.get_edge_observers(archetypes, archetype_id, new_archetype_id);
+
             // Add an edge from the old archetype to the new archetype.
             archetypes[archetype_id]
                 .edges_mut()
                 .cache_archetype_after_bundle_insert(
                     self.id,
                     new_archetype_id,
+                    observers,
                     bundle_status,
                     added_required_components,
                     added,
