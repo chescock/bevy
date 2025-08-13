@@ -152,9 +152,9 @@ pub struct ArchetypeEdgeObservers {
     /// The set of query observers on the target archetype.
     /// If this does not match the current value, then this value is stale and should be recalculated.
     pub(crate) target: Arc<ArchetypeObservers>,
-    pub(crate) enter_always: Vec<Entity>,
+    pub(crate) enter_keep: Vec<Entity>,
     pub(crate) enter_replace: Vec<Entity>,
-    pub(crate) leave_always: Vec<Entity>,
+    pub(crate) leave_keep: Vec<Entity>,
     pub(crate) leave_replace: Vec<Entity>,
 }
 
