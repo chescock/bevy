@@ -3,7 +3,7 @@ use bevy_ptr::ConstNonNull;
 use core::ptr::NonNull;
 
 use crate::{
-    archetype::{Archetype, ArchetypeCreated, ArchetypeId, ArchetypeWithEdgeObservers, Archetypes},
+    archetype::{Archetype, ArchetypeCreated, ArchetypeId, Archetypes},
     bundle::{Bundle, BundleId, BundleInfo},
     change_detection::MaybeLocation,
     component::{ComponentId, Components, ComponentsRegistrator, StorageType},
@@ -73,7 +73,7 @@ impl<'w> BundleRemover<'w> {
                 !require_all,
             )
         };
-        let new_archetype_id = new_archetype_id?.archetype_id;
+        let new_archetype_id = new_archetype_id?;
 
         if new_archetype_id == archetype_id {
             return None;
@@ -311,23 +311,15 @@ impl BundleInfo {
     ///
     /// # Safety
     /// `archetype_id` must exist and components in `bundle_info` must exist
-    pub(crate) unsafe fn remove_bundle_from_archetype<'a>(
+    pub(crate) unsafe fn remove_bundle_from_archetype(
         &self,
-        archetypes: &'a mut Archetypes,
+        archetypes: &mut Archetypes,
         storages: &mut Storages,
         components: &Components,
         observers: &Observers,
         archetype_id: ArchetypeId,
         intersection: bool,
-    ) -> (Option<&'a ArchetypeWithEdgeObservers>, bool) {
-        // get edge
-        // if exists
-        //  get new archetype
-        //  if stale, update observers and store
-        // else new
-        //  calc new archetype
-        //  update obserers and store
-
+    ) -> (Option<ArchetypeId>, bool) {
         // Check the archetype graph to see if the bundle has been
         // removed from this archetype in the past.
         let archetype_after_remove_result = {
@@ -338,8 +330,9 @@ impl BundleInfo {
                 edges.get_archetype_after_bundle_take(self.id())
             }
         };
-        let is_new_created = if archetype_after_remove_result.is_some() {
-            false
+        let (result, is_new_created) = if let Some(result) = archetype_after_remove_result {
+            // This bundle removal result is cached. Just return that!
+            (result, false)
         } else {
             let mut next_table_components;
             let mut next_sparse_set_components;
@@ -399,35 +392,20 @@ impl BundleInfo {
                 next_table_components,
                 next_sparse_set_components,
             );
-
-            let result = Some(ArchetypeWithEdgeObservers {
-                archetype_id: new_archetype_id,
-                observers: todo!(),
-            });
-            let current_archetype = &mut archetypes[archetype_id];
-            // Cache the result in an edge.
-            if intersection {
-                current_archetype
-                    .edges_mut()
-                    .cache_archetype_after_bundle_remove(self.id(), result);
-            } else {
-                current_archetype
-                    .edges_mut()
-                    .cache_archetype_after_bundle_take(self.id(), result);
-            };
-            is_new_created
+            (Some(new_archetype_id), is_new_created)
         };
-
-        // Do this lookup again to work around a borrow checker limitation
-        // We can `unwrap()` the result because we just inserted it if it didn't exist
-        let edges = archetypes[archetype_id].edges();
-        let result = if intersection {
-            edges.get_archetype_after_bundle_remove(self.id())
+        let current_archetype = &mut archetypes[archetype_id];
+        // Cache the result in an edge.
+        if intersection {
+            current_archetype
+                .edges_mut()
+                .cache_archetype_after_bundle_remove(self.id(), result);
         } else {
-            edges.get_archetype_after_bundle_take(self.id())
-        };
-
-        (result.unwrap().as_ref(), is_new_created)
+            current_archetype
+                .edges_mut()
+                .cache_archetype_after_bundle_take(self.id(), result);
+        }
+        (result, is_new_created)
     }
 }
 
