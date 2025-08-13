@@ -12,7 +12,9 @@
 use bevy_platform::{collections::HashMap, sync::Arc};
 
 use crate::{
-    archetype::{ArchetypeEdgeObservers, ArchetypeFlags, ArchetypeId, Archetypes},
+    archetype::{
+        ArchetypeEdgeObservers, ArchetypeFlags, ArchetypeId, ArchetypeObservers, Archetypes,
+    },
     change_detection::MaybeLocation,
     component::ComponentId,
     entity::EntityHashMap,
@@ -20,6 +22,8 @@ use crate::{
     prelude::*,
     world::DeferredWorld,
 };
+
+use core::alloc::Vec;
 
 /// An internal lookup table tracking all of the observers in the world.
 ///
@@ -184,13 +188,68 @@ impl Observers {
         }
     }
 
+    pub(crate) fn get_archetype_observers(
+        &self,
+        components: impl Iterator<Item = ComponentId>,
+    ) -> Arc<ArchetypeObservers> {
+        let enter = todo!();
+        let leave = todo!();
+        // TODO: dedup arcs
+        //  which requires a manual Eq/Hash impl to use pointer equality on arcs
+        Arc::new(ArchetypeObservers { enter, leave })
+    }
+
     pub(crate) fn get_edge_observers(
         &self,
         archetypes: &Archetypes,
         source: ArchetypeId,
         target: ArchetypeId,
+        always: &[ComponentId],
+        replace_only: &[ComponentId],
     ) -> Arc<ArchetypeEdgeObservers> {
-        todo!()
+        let source = archetypes[source].observers.clone();
+        let target = archetypes[target].observers.clone();
+
+        let matches = |components: &[ComponentId], observer: Entity| false;
+
+        let mut enter_always = Vec::new();
+        let mut enter_replace = Vec::new();
+        for &o in &target.enter {
+            if !source.enter.contains(&o) || matches(always, o) {
+                enter_always.push(o);
+            } else if matches(replace_only, o) {
+                enter_replace.push(o);
+            }
+        }
+
+        let mut leave_always = Vec::new();
+        let mut leave_replace = Vec::new();
+        for &o in &source.leave {
+            if !target.leave.contains(&o) || matches(always, o) {
+                leave_always.push(o);
+            } else if matches(replace_only, o) {
+                leave_replace.push(o);
+            }
+        }
+
+        let enter = target.enter.iter().copied();
+        // TODO: need to also fire if components change!
+        // ... this is tricky because the edge is *shared* between InsertMode::Keep and InsertMode::Replace
+        // so we need separate lists?
+        // note that we need to check components even for Keep because it may fire on Option or Has
+        // the replace list is a *superset* of the other, so maybe keep them as diffs?
+        // no, easier to duplicate
+        let enter = enter.filter(|o| !source.enter.contains(o)).collect();
+        let leave = source.leave.iter().copied();
+        let leave = leave.filter(|o| !target.leave.contains(o)).collect();
+        // TODO: dedup arcs
+        //  which requires a manual Eq/Hash impl to use pointer equality on arcs
+        Arc::new(ArchetypeEdgeObservers {
+            source,
+            target,
+            enter,
+            leave,
+        })
     }
 }
 

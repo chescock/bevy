@@ -22,7 +22,7 @@
 use crate::{
     bundle::BundleId,
     component::{ComponentId, Components, RequiredComponentConstructor, StorageType},
-    entity::{Entity, EntityLocation},
+    entity::{Entity, EntityIndexSet, EntityLocation},
     event::Event,
     observer::Observers,
     storage::{ImmutableSparseSet, SparseArray, SparseSet, TableId, TableRow},
@@ -134,12 +134,14 @@ pub(crate) enum ComponentStatus {
     Existing,
 }
 
+// TODO: Should these types be in Observers instead?
+// that's where we use the internals
+// archetype graph just needs the largely-public API of iterating edge observers
+
 /// A set of query observers that observe a specific archetype.
 pub(crate) struct ArchetypeObservers {
-    add: Vec<Entity>,
-    insert: Vec<Entity>,
-    replace: Vec<Entity>,
-    remove: Vec<Entity>,
+    pub(crate) enter: EntityIndexSet,
+    pub(crate) leave: EntityIndexSet,
 }
 
 /// A set of query observers that should trigger on a specific archetype edge.
@@ -150,10 +152,10 @@ pub struct ArchetypeEdgeObservers {
     /// The set of query observers on the target archetype.
     /// If this does not match the current value, then this value is stale and should be recalculated.
     pub(crate) target: Arc<ArchetypeObservers>,
-    add: Vec<Entity>,
-    insert: Vec<Entity>,
-    replace: Vec<Entity>,
-    remove: Vec<Entity>,
+    pub(crate) enter_always: Vec<Entity>,
+    pub(crate) enter_replace: Vec<Entity>,
+    pub(crate) leave_always: Vec<Entity>,
+    pub(crate) leave_replace: Vec<Entity>,
 }
 
 #[derive(Clone)]
@@ -479,6 +481,7 @@ impl Archetype {
                 .or_default()
                 .insert(id, ArchetypeRecord { column: None });
         }
+        let observers = observers.get_archetype_observers(archetype_components.indices());
         Self {
             id,
             table_id,
@@ -486,7 +489,7 @@ impl Archetype {
             components: archetype_components.into_immutable(),
             edges: Default::default(),
             flags,
-            observers: todo!(),
+            observers,
         }
     }
 
