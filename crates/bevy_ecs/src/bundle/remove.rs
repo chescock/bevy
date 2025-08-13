@@ -320,6 +320,14 @@ impl BundleInfo {
         archetype_id: ArchetypeId,
         intersection: bool,
     ) -> (Option<&'a ArchetypeWithEdgeObservers>, bool) {
+        // get edge
+        // if exists
+        //  get new archetype
+        //  if stale, update observers and store
+        // else new
+        //  calc new archetype
+        //  update obserers and store
+
         // Check the archetype graph to see if the bundle has been
         // removed from this archetype in the past.
         let archetype_after_remove_result = {
