@@ -12,12 +12,10 @@
 use bevy_platform::{collections::HashMap, sync::Arc};
 
 use crate::{
-    archetype::{
-        ArchetypeEdgeObservers, ArchetypeFlags, ArchetypeId, ArchetypeObservers, Archetypes,
-    },
+    archetype::{ArchetypeFlags, ArchetypeId, Archetypes},
     change_detection::MaybeLocation,
     component::ComponentId,
-    entity::EntityHashMap,
+    entity::{EntityHashMap, EntityIndexSet},
     observer::{ObserverRunner, ObserverTrigger},
     prelude::*,
     world::DeferredWorld,
@@ -331,5 +329,39 @@ impl CachedComponentObservers {
     /// Returns the observers listening for this trigger targeting this component on a specific entity.
     pub fn entity_component_observers(&self) -> &EntityHashMap<ObserverMap> {
         &self.entity_component_observers
+    }
+}
+
+// TODO: Should these types be in Observers instead?
+// that's where we use the internals
+// archetype graph just needs the largely-public API of iterating edge observers
+
+/// A set of query observers that observe a specific archetype.
+pub(crate) struct ArchetypeObservers {
+    enter: EntityIndexSet,
+    leave: EntityIndexSet,
+}
+
+/// A set of query observers that should trigger on a specific archetype edge.
+pub struct ArchetypeEdgeObservers {
+    /// The set of query observers on the source archetype.
+    /// If this does not match the current value, then this value is stale and should be recalculated.
+    source: Arc<ArchetypeObservers>,
+    /// The set of query observers on the target archetype.
+    /// If this does not match the current value, then this value is stale and should be recalculated.
+    target: Arc<ArchetypeObservers>,
+    enter_keep: Vec<Entity>,
+    enter_replace: Vec<Entity>,
+    leave_keep: Vec<Entity>,
+    leave_replace: Vec<Entity>,
+}
+
+impl ArchetypeEdgeObservers {
+    pub fn is_valid(
+        &self,
+        source: &Arc<ArchetypeObservers>,
+        target: &Arc<ArchetypeObservers>,
+    ) -> bool {
+        Arc::ptr_eq(&self.source, source) && Arc::ptr_eq(&self.target, target)
     }
 }

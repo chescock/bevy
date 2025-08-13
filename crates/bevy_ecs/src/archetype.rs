@@ -22,9 +22,9 @@
 use crate::{
     bundle::BundleId,
     component::{ComponentId, Components, RequiredComponentConstructor, StorageType},
-    entity::{Entity, EntityIndexSet, EntityLocation},
+    entity::{Entity, EntityLocation},
     event::Event,
-    observer::Observers,
+    observer::{ArchetypeEdgeObservers, ArchetypeObservers, Observers},
     storage::{ImmutableSparseSet, SparseArray, SparseSet, TableId, TableRow},
 };
 use alloc::{boxed::Box, vec::Vec};
@@ -132,30 +132,6 @@ impl ArchetypeId {
 pub(crate) enum ComponentStatus {
     Added,
     Existing,
-}
-
-// TODO: Should these types be in Observers instead?
-// that's where we use the internals
-// archetype graph just needs the largely-public API of iterating edge observers
-
-/// A set of query observers that observe a specific archetype.
-pub(crate) struct ArchetypeObservers {
-    pub(crate) enter: EntityIndexSet,
-    pub(crate) leave: EntityIndexSet,
-}
-
-/// A set of query observers that should trigger on a specific archetype edge.
-pub struct ArchetypeEdgeObservers {
-    /// The set of query observers on the source archetype.
-    /// If this does not match the current value, then this value is stale and should be recalculated.
-    pub(crate) source: Arc<ArchetypeObservers>,
-    /// The set of query observers on the target archetype.
-    /// If this does not match the current value, then this value is stale and should be recalculated.
-    pub(crate) target: Arc<ArchetypeObservers>,
-    pub(crate) enter_keep: Vec<Entity>,
-    pub(crate) enter_replace: Vec<Entity>,
-    pub(crate) leave_keep: Vec<Entity>,
-    pub(crate) leave_replace: Vec<Entity>,
 }
 
 #[derive(Clone)]

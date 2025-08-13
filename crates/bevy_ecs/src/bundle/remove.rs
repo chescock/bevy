@@ -1,19 +1,15 @@
 use alloc::vec::Vec;
-use bevy_platform::sync::Arc;
 use bevy_ptr::ConstNonNull;
 use core::ptr::NonNull;
 
 use crate::{
-    archetype::{
-        Archetype, ArchetypeCreated, ArchetypeEdgeObservers, ArchetypeId,
-        ArchetypeWithEdgeObservers, Archetypes,
-    },
+    archetype::{Archetype, ArchetypeCreated, ArchetypeId, ArchetypeWithEdgeObservers, Archetypes},
     bundle::{Bundle, BundleId, BundleInfo},
     change_detection::MaybeLocation,
     component::{ComponentId, Components, ComponentsRegistrator, StorageType},
     entity::{Entity, EntityLocation},
     lifecycle::{REMOVE, REPLACE},
-    observer::Observers,
+    observer::{ArchetypeEdgeObservers, Observers},
     relationship::RelationshipHookMode,
     storage::{SparseSets, Storages, Table},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -350,11 +346,10 @@ impl BundleInfo {
         let (new_archetype_id, is_new_created) = if let Some(result) = archetype_after_remove_result
         {
             if let Some(edge) = result
-                && !(Arc::ptr_eq(&edge.observers.source, &archetypes[archetype_id].observers)
-                    && Arc::ptr_eq(
-                        &edge.observers.target,
-                        &archetypes[edge.archetype_id].observers,
-                    ))
+                && !edge.observers.is_valid(
+                    &archetypes[archetype_id].observers,
+                    &archetypes[edge.archetype_id].observers,
+                )
             {
                 // This bundle removal result was cached, but the observer list is stale.
                 (edge.archetype_id, false)

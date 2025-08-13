@@ -3,15 +3,13 @@ use core::ptr::NonNull;
 use bevy_ptr::ConstNonNull;
 
 use crate::{
-    archetype::{
-        Archetype, ArchetypeCreated, ArchetypeEdgeObservers, ArchetypeId, SpawnBundleStatus,
-    },
+    archetype::{Archetype, ArchetypeCreated, ArchetypeId, SpawnBundleStatus},
     bundle::{Bundle, BundleId, BundleInfo, DynamicBundle, InsertMode},
     change_detection::MaybeLocation,
     component::{ComponentsRegistrator, Tick},
     entity::{Entities, Entity, EntityLocation},
     lifecycle::{ADD, INSERT},
-    observer::Observers,
+    observer::{ArchetypeEdgeObservers, Observers},
     relationship::RelationshipHookMode,
     storage::Table,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -66,7 +64,7 @@ impl<'w> BundleSpawner<'w> {
             table: table.into(),
             archetype: archetype.into(),
             // TODO: What observers to fire here?
-            //  every 'leave' observer for the archetype - no need for edge calculations!
+            //  every 'enter' observer for the archetype - no need for edge calculations!
             observers: todo!(),
             change_tick,
             world: world.as_unsafe_world_cell(),
