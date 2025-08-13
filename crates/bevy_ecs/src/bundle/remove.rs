@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
+use bevy_platform::sync::Arc;
 use bevy_ptr::ConstNonNull;
 use core::ptr::NonNull;
 
 use crate::{
-    archetype::{Archetype, ArchetypeCreated, ArchetypeId, Archetypes},
+    archetype::{Archetype, ArchetypeCreated, ArchetypeId, ArchetypeWithEdgeObservers, Archetypes},
     bundle::{Bundle, BundleId, BundleInfo},
     change_detection::MaybeLocation,
     component::{ComponentId, Components, ComponentsRegistrator, StorageType},
@@ -73,7 +74,7 @@ impl<'w> BundleRemover<'w> {
                 !require_all,
             )
         };
-        let new_archetype_id = new_archetype_id?;
+        let new_archetype_id = new_archetype_id?.archetype_id;
 
         if new_archetype_id == archetype_id {
             return None;
@@ -311,15 +312,15 @@ impl BundleInfo {
     ///
     /// # Safety
     /// `archetype_id` must exist and components in `bundle_info` must exist
-    pub(crate) unsafe fn remove_bundle_from_archetype(
+    pub(crate) unsafe fn remove_bundle_from_archetype<'a>(
         &self,
-        archetypes: &mut Archetypes,
+        archetypes: &'a mut Archetypes,
         storages: &mut Storages,
         components: &Components,
         observers: &Observers,
         archetype_id: ArchetypeId,
         intersection: bool,
-    ) -> (Option<ArchetypeId>, bool) {
+    ) -> (Option<&'a ArchetypeWithEdgeObservers>, bool) {
         // Check the archetype graph to see if the bundle has been
         // removed from this archetype in the past.
         let archetype_after_remove_result = {
@@ -330,9 +331,29 @@ impl BundleInfo {
                 edges.get_archetype_after_bundle_take(self.id())
             }
         };
-        let (result, is_new_created) = if let Some(result) = archetype_after_remove_result {
-            // This bundle removal result is cached. Just return that!
-            (result, false)
+        let (new_archetype_id, is_new_created) = if let Some(result) = archetype_after_remove_result
+        {
+            if let Some(edge) = result
+                && !(Arc::ptr_eq(&edge.observers.source, &archetypes[archetype_id].observers)
+                    && Arc::ptr_eq(
+                        &edge.observers.target,
+                        &archetypes[edge.archetype_id].observers,
+                    ))
+            {
+                // This bundle removal result was cached, but the observer list is stale.
+                (edge.archetype_id, false)
+            } else {
+                // This bundle removal result is cached.
+                // Perform the lookup again to work around borrow checker issue where it considers
+                // a borrow in an early return to conflict with the rest of the function.
+                let edges = archetypes[archetype_id].edges();
+                let result = if intersection {
+                    edges.get_archetype_after_bundle_remove(self.id())
+                } else {
+                    edges.get_archetype_after_bundle_take(self.id())
+                };
+                return (result.unwrap().as_ref(), false);
+            }
         } else {
             let mut next_table_components;
             let mut next_sparse_set_components;
@@ -392,20 +413,27 @@ impl BundleInfo {
                 next_table_components,
                 next_sparse_set_components,
             );
-            (Some(new_archetype_id), is_new_created)
+
+            (new_archetype_id, is_new_created)
         };
+
+        let result = Some(ArchetypeWithEdgeObservers {
+            archetype_id: new_archetype_id,
+            observers: todo!(),
+        });
+
         let current_archetype = &mut archetypes[archetype_id];
         // Cache the result in an edge.
-        if intersection {
+        let result = if intersection {
             current_archetype
                 .edges_mut()
-                .cache_archetype_after_bundle_remove(self.id(), result);
+                .cache_archetype_after_bundle_remove(self.id(), result)
         } else {
             current_archetype
                 .edges_mut()
-                .cache_archetype_after_bundle_take(self.id(), result);
-        }
-        (result, is_new_created)
+                .cache_archetype_after_bundle_take(self.id(), result)
+        };
+        (result.as_ref(), is_new_created)
     }
 }
 

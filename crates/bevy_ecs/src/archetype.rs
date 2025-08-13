@@ -146,10 +146,10 @@ pub(crate) struct ArchetypeObservers {
 pub(crate) struct ArchetypeEdgeObservers {
     /// The set of query observers on the source archetype.
     /// If this does not match the current value, then this value is stale and should be recalculated.
-    source: Arc<ArchetypeObservers>,
+    pub(crate) source: Arc<ArchetypeObservers>,
     /// The set of query observers on the target archetype.
     /// If this does not match the current value, then this value is stale and should be recalculated.
-    target: Arc<ArchetypeObservers>,
+    pub(crate) target: Arc<ArchetypeObservers>,
     add: Vec<Entity>,
     insert: Vec<Entity>,
     replace: Vec<Entity>,
@@ -424,6 +424,7 @@ pub struct Archetype {
     entities: Vec<ArchetypeEntity>,
     components: ImmutableSparseSet<ComponentId, ArchetypeComponentInfo>,
     pub(crate) flags: ArchetypeFlags,
+    pub(crate) observers: Arc<ArchetypeObservers>,
 }
 
 impl Archetype {
@@ -484,6 +485,7 @@ impl Archetype {
             components: archetype_components.into_immutable(),
             edges: Default::default(),
             flags,
+            observers: todo!(),
         }
     }
 
