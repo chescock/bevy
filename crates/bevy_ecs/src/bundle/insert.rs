@@ -163,6 +163,15 @@ impl<'w> BundleInserter<'w> {
             // SAFETY: Mutable references do not alias and will be dropped after this block
             let mut deferred_world = self.world.into_deferred();
 
+            Observers::invoke_query_observers(
+                deferred_world.reborrow(),
+                REPLACE,
+                insert_mode,
+                entity,
+                &archetype_after_insert.observers,
+                caller,
+            );
+
             if insert_mode == InsertMode::Replace {
                 if archetype.has_replace_observer() {
                     deferred_world.trigger_observers(
@@ -396,6 +405,15 @@ impl<'w> BundleInserter<'w> {
                     }
                 }
             }
+
+            Observers::invoke_query_observers(
+                deferred_world.reborrow(),
+                INSERT,
+                insert_mode,
+                entity,
+                &archetype_after_insert.observers,
+                caller,
+            );
         }
 
         (new_location, after_effect)
@@ -429,6 +447,7 @@ impl BundleInfo {
             .edges()
             .get_archetype_after_bundle_insert(self.id)
         {
+            // TODO: Need to check that the observer edge is current!
             return (archetype_after_insert_id, false);
         }
         let mut new_table_components = Vec::new();

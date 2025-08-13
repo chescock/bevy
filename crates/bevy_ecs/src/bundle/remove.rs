@@ -4,7 +4,10 @@ use bevy_ptr::ConstNonNull;
 use core::ptr::NonNull;
 
 use crate::{
-    archetype::{Archetype, ArchetypeCreated, ArchetypeId, ArchetypeWithEdgeObservers, Archetypes},
+    archetype::{
+        Archetype, ArchetypeCreated, ArchetypeEdgeObservers, ArchetypeId,
+        ArchetypeWithEdgeObservers, Archetypes,
+    },
     bundle::{Bundle, BundleId, BundleInfo},
     change_detection::MaybeLocation,
     component::{ComponentId, Components, ComponentsRegistrator, StorageType},
@@ -23,6 +26,7 @@ pub(crate) struct BundleRemover<'w> {
     old_and_new_table: Option<(NonNull<Table>, NonNull<Table>)>,
     old_archetype: NonNull<Archetype>,
     new_archetype: NonNull<Archetype>,
+    observers: NonNull<ArchetypeEdgeObservers>,
     pub(crate) relationship_hook_mode: RelationshipHookMode,
 }
 
@@ -64,7 +68,7 @@ impl<'w> BundleRemover<'w> {
     ) -> Option<Self> {
         let bundle_info = world.bundles.get_unchecked(bundle_id);
         // SAFETY: Caller ensures archetype and bundle ids are correct.
-        let (new_archetype_id, is_new_created) = unsafe {
+        let (new_archetype, is_new_created) = unsafe {
             bundle_info.remove_bundle_from_archetype(
                 &mut world.archetypes,
                 &mut world.storages,
@@ -74,7 +78,9 @@ impl<'w> BundleRemover<'w> {
                 !require_all,
             )
         };
-        let new_archetype_id = new_archetype_id?.archetype_id;
+        let new_archetype = new_archetype?;
+        let new_archetype_id = new_archetype.archetype_id;
+        let observers = (&*new_archetype.observers).into();
 
         if new_archetype_id == archetype_id {
             return None;
@@ -97,6 +103,7 @@ impl<'w> BundleRemover<'w> {
             bundle_info: bundle_info.into(),
             new_archetype: new_archetype.into(),
             old_archetype: old_archetype.into(),
+            observers,
             old_and_new_table: tables,
             world: world.as_unsafe_world_cell(),
             relationship_hook_mode: RelationshipHookMode::Run,
@@ -150,6 +157,15 @@ impl<'w> BundleRemover<'w> {
                     .iter_explicit_components()
                     .filter(|component_id| self.old_archetype.as_ref().contains(*component_id))
             };
+
+            Observers::invoke_query_observers(
+                deferred_world.reborrow(),
+                REPLACE,
+                super::InsertMode::Keep,
+                entity,
+                self.observers.as_ref(),
+                caller,
+            );
             if self.old_archetype.as_ref().has_replace_observer() {
                 deferred_world.trigger_observers(
                     REPLACE,

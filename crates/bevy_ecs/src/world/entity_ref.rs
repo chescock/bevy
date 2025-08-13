@@ -15,7 +15,7 @@ use crate::{
     },
     event::EntityEvent,
     lifecycle::{DESPAWN, REMOVE, REPLACE},
-    observer::Observer,
+    observer::{Observer, Observers},
     query::{Access, DebugCheckedUnwrap, ReadOnlyQueryData, ReleaseStateQueryData},
     relationship::RelationshipHookMode,
     resource::Resource,
@@ -2575,6 +2575,17 @@ impl<'w> EntityWorldMut<'w> {
 
         // SAFETY: All components in the archetype exist in world
         unsafe {
+            Observers::invoke_query_observers(
+                deferred_world.reborrow(),
+                REPLACE,
+                InsertMode::Keep,
+                self.entity,
+                // TODO: What observers to fire here?
+                //  every 'leave' observer for the archetype - no need for edge calculations!
+                todo!(),
+                caller,
+            );
+
             if archetype.has_despawn_observer() {
                 deferred_world.trigger_observers(
                     DESPAWN,

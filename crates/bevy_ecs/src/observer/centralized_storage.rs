@@ -75,6 +75,17 @@ impl Observers {
         }
     }
 
+    pub(crate) fn invoke_query_observers(
+        mut world: DeferredWorld,
+        event_key: EventKey,
+        insert_mode: crate::bundle::InsertMode,
+        target: Entity,
+        observers: &ArchetypeEdgeObservers,
+        caller: MaybeLocation,
+    ) {
+        todo!()
+    }
+
     /// This will run the observers of the given `event_key`, targeting the given `entity` and `components`.
     pub(crate) fn invoke<T>(
         mut world: DeferredWorld,

@@ -159,6 +159,24 @@ impl<'w> DeferredWorld<'w> {
         // - REPLACE is able to accept ZST events
         unsafe {
             let archetype = &*archetype;
+            // TODO: What to trigger here?
+            //  we want to cache this somewhere,
+            //  but we aren't looking up the edge right now
+            //  *can* we get the edge?
+            //  we have archetype.edges()
+            //  so if we can get a `BundleId` then we can use the cache there
+            // Bundles::init_component_info ??? creates a dynamic bundle for a single component id, which is what we need here
+
+            Observers::invoke_query_observers(
+                self.reborrow(),
+                REPLACE,
+                crate::bundle::InsertMode::Replace,
+                entity,
+                // TODO: What observers to fire here?
+                todo!(),
+                MaybeLocation::caller(),
+            );
+
             self.trigger_on_replace(
                 archetype,
                 entity,
@@ -214,6 +232,15 @@ impl<'w> DeferredWorld<'w> {
                     MaybeLocation::caller(),
                 );
             }
+            Observers::invoke_query_observers(
+                self.reborrow(),
+                INSERT,
+                crate::bundle::InsertMode::Replace,
+                entity,
+                // TODO: What observers to fire here?
+                todo!(),
+                MaybeLocation::caller(),
+            );
         }
 
         Ok(Some(result))

@@ -3,12 +3,15 @@ use core::ptr::NonNull;
 use bevy_ptr::ConstNonNull;
 
 use crate::{
-    archetype::{Archetype, ArchetypeCreated, ArchetypeId, SpawnBundleStatus},
+    archetype::{
+        Archetype, ArchetypeCreated, ArchetypeEdgeObservers, ArchetypeId, SpawnBundleStatus,
+    },
     bundle::{Bundle, BundleId, BundleInfo, DynamicBundle, InsertMode},
     change_detection::MaybeLocation,
     component::{ComponentsRegistrator, Tick},
     entity::{Entities, Entity, EntityLocation},
     lifecycle::{ADD, INSERT},
+    observer::Observers,
     relationship::RelationshipHookMode,
     storage::Table,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -20,6 +23,7 @@ pub(crate) struct BundleSpawner<'w> {
     bundle_info: ConstNonNull<BundleInfo>,
     table: NonNull<Table>,
     archetype: NonNull<Archetype>,
+    observers: NonNull<ArchetypeEdgeObservers>,
     change_tick: Tick,
 }
 
@@ -61,6 +65,9 @@ impl<'w> BundleSpawner<'w> {
             bundle_info: bundle_info.into(),
             table: table.into(),
             archetype: archetype.into(),
+            // TODO: What observers to fire here?
+            //  every 'leave' observer for the archetype - no need for edge calculations!
+            observers: todo!(),
             change_tick,
             world: world.as_unsafe_world_cell(),
         };
@@ -157,6 +164,14 @@ impl<'w> BundleSpawner<'w> {
                     caller,
                 );
             }
+            Observers::invoke_query_observers(
+                deferred_world.reborrow(),
+                ADD,
+                InsertMode::Keep,
+                entity,
+                self.observers.as_ref(),
+                caller,
+            );
         };
 
         (location, after_effect)
