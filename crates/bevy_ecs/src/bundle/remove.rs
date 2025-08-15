@@ -427,18 +427,18 @@ impl BundleInfo {
             (new_archetype_id, is_new_created)
         };
 
-        // TODO: we need the set of removed components here... even for recalculation!
-        //  rename added and existing and figure out which one to pass it to
-        //  but we *just* calculated this list! (sort of)
-        //  note that we *do* need to filter it to components that exist,
-        //  so that we don't trigger Option<T> when removing T if we don't have it!
+        let current_archetype = &archetypes[archetype_id];
+        let changed = self
+            .iter_explicit_components()
+            .filter(|&component_id| current_archetype.contains(component_id))
+            .collect::<Vec<_>>();
         let result = Some(ArchetypeWithEdgeObservers {
             archetype_id: new_archetype_id,
             observers: observers.get_edge_observers(
                 archetypes,
                 archetype_id,
                 new_archetype_id,
-                todo!(),
+                &changed,
                 &[],
             ),
         });
