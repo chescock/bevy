@@ -18,7 +18,7 @@ use crate::{
     entity::{EntityHashMap, EntityIndexMap},
     observer::{ObserverRunner, ObserverTrigger},
     prelude::*,
-    query::Access,
+    query::FilteredAccess,
     world::DeferredWorld,
 };
 
@@ -41,6 +41,8 @@ pub struct Observers {
     despawn: CachedObservers,
     // Map from trigger type to set of observers listening to that trigger
     cache: HashMap<EventKey, CachedObservers>,
+    enter: EntityHashMap<ArchetypeObserverState>,
+    leave: EntityHashMap<ArchetypeObserverState>,
 }
 
 impl Observers {
@@ -213,10 +215,21 @@ impl Observers {
 
     pub(crate) fn get_archetype_observers(
         &self,
-        components: impl Iterator<Item = ComponentId>,
+        set_contains_id: &impl Fn(ComponentId) -> bool,
     ) -> Arc<ArchetypeObservers> {
-        let enter = todo!();
-        let leave = todo!();
+        // TODO: Make an index so we don't need to scan all observers for every new archetype
+        let enter = self
+            .enter
+            .iter()
+            .filter(|&(_, state)| state.access.matches_component_set(set_contains_id))
+            .map(|(&observer, state)| (observer, state.runner))
+            .collect();
+        let leave = self
+            .leave
+            .iter()
+            .filter(|&(_, state)| state.access.matches_component_set(set_contains_id))
+            .map(|(&observer, state)| (observer, state.runner))
+            .collect();
         // TODO: dedup arcs
         //  which requires a manual Eq/Hash impl to use pointer equality on arcs
         Arc::new(ArchetypeObservers { enter, leave })
@@ -235,18 +248,17 @@ impl Observers {
 
         let mut enter_keep = Vec::new();
         let mut enter_replace = Vec::new();
-        for (&observer, state) in &target.enter {
-            let runnable_observer = RunnableObserver {
-                observer,
-                runner: state.runner,
-            };
+        for runnable_observer in target.iter_enter() {
+            let state = &self.enter[&runnable_observer.observer];
             // Trigger the observer either if it did not match the old archetype,
             // or if the values it queries will have changed.
             // A component that is inserted or removed will trigger any observer
             // that has read (&T) or archetypal (Has<T>) access.
             // An existing component will only trigger observers with read (&T) access,
             // and only trigger them when using `InsertMode::Replace`.
-            if !source.enter.contains_key(&observer) || state.matches_changed(changed) {
+            if !source.enter.contains_key(&runnable_observer.observer)
+                || state.matches_changed(changed)
+            {
                 enter_keep.push(runnable_observer);
                 enter_replace.push(runnable_observer);
             } else if state.matches_existing(existing) {
@@ -256,18 +268,17 @@ impl Observers {
 
         let mut leave_keep = Vec::new();
         let mut leave_replace = Vec::new();
-        for (&observer, state) in &target.leave {
-            let runnable_observer = RunnableObserver {
-                observer,
-                runner: state.runner,
-            };
+        for runnable_observer in target.iter_leave() {
+            let state = &self.leave[&runnable_observer.observer];
             // Trigger the observer either if it does not match the new archetype,
             // or if the values it queries will have changed.
             // A component that is inserted or removed will trigger any observer
             // that has read (&T) or archetypal (Has<T>) access.
             // An existing component will only trigger observers with read (&T) access,
             // and only trigger them when using `InsertMode::Replace`.
-            if !target.leave.contains_key(&observer) || state.matches_changed(changed) {
+            if !target.leave.contains_key(&runnable_observer.observer)
+                || state.matches_changed(changed)
+            {
                 leave_keep.push(runnable_observer);
                 leave_replace.push(runnable_observer);
             } else if state.matches_existing(existing) {
@@ -357,22 +368,23 @@ pub(crate) struct RunnableObserver {
 // that's where we use the internals
 // archetype graph just needs the largely-public API of iterating edge observers
 
+#[derive(Debug)]
 struct ArchetypeObserverState {
     runner: ObserverRunner,
-    access: Access<ComponentId>,
+    access: FilteredAccess<ComponentId>,
 }
 
 impl ArchetypeObserverState {
     fn matches_changed(&self, components: &[ComponentId]) -> bool {
-        components
-            .iter()
-            .any(|&c| self.access.has_component_read(c) || self.access.has_archetypal(c))
+        components.iter().any(|&c| {
+            self.access.access().has_component_read(c) || self.access.access().has_archetypal(c)
+        })
     }
 
     fn matches_existing(&self, components: &[ComponentId]) -> bool {
         components
             .iter()
-            .any(|&c| self.access.has_component_read(c))
+            .any(|&c| self.access.access().has_component_read(c))
     }
 }
 
@@ -380,27 +392,21 @@ impl ArchetypeObserverState {
 pub(crate) struct ArchetypeObservers {
     // TODO: no, just store ObserverRunner here!
     //  store the access centrally and do a hashmap lookup every time
-    enter: EntityIndexMap<ArchetypeObserverState>,
-    leave: EntityIndexMap<ArchetypeObserverState>,
+    enter: EntityIndexMap<ObserverRunner>,
+    leave: EntityIndexMap<ObserverRunner>,
 }
 
 impl ArchetypeObservers {
     pub fn iter_enter(&self) -> impl Iterator<Item = RunnableObserver> {
         self.enter
             .iter()
-            .map(|(&observer, state)| RunnableObserver {
-                observer,
-                runner: state.runner,
-            })
+            .map(|(&observer, &runner)| RunnableObserver { observer, runner })
     }
 
     pub fn iter_leave(&self) -> impl Iterator<Item = RunnableObserver> {
         self.leave
             .iter()
-            .map(|(&observer, state)| RunnableObserver {
-                observer,
-                runner: state.runner,
-            })
+            .map(|(&observer, &runner)| RunnableObserver { observer, runner })
     }
 }
 

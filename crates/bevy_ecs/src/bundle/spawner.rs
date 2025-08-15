@@ -9,7 +9,7 @@ use crate::{
     component::{ComponentsRegistrator, Tick},
     entity::{Entities, Entity, EntityLocation},
     lifecycle::{ADD, INSERT},
-    observer::{ArchetypeEdgeObservers, Observers},
+    observer::Observers,
     relationship::RelationshipHookMode,
     storage::Table,
     world::{unsafe_world_cell::UnsafeWorldCell, World},

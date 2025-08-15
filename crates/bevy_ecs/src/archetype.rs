@@ -457,7 +457,7 @@ impl Archetype {
                 .or_default()
                 .insert(id, ArchetypeRecord { column: None });
         }
-        let observers = observers.get_archetype_observers(archetype_components.indices());
+        let observers = observers.get_archetype_observers(&|c| archetype_components.contains(c));
         Self {
             id,
             table_id,

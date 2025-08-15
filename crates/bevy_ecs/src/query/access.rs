@@ -986,6 +986,20 @@ impl<T: SparseSetIndex> From<FilteredAccess<T>> for FilteredAccessSet<T> {
     }
 }
 
+impl<T: SparseSetIndex> FilteredAccess<T> {
+    pub fn matches_component_set(&self, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
+        self.filter_sets.iter().any(|set| {
+            set.with
+                .ones()
+                .all(|index| set_contains_id(ComponentId::get_sparse_set_index(index)))
+                && set
+                    .without
+                    .ones()
+                    .all(|index| !set_contains_id(ComponentId::get_sparse_set_index(index)))
+        })
+    }
+}
+
 /// Records how two accesses conflict with each other
 #[derive(Debug, PartialEq, From)]
 pub enum AccessConflicts {
