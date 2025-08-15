@@ -18,6 +18,7 @@ use crate::{
     entity::{EntityHashMap, EntityIndexMap},
     observer::{ObserverRunner, ObserverTrigger},
     prelude::*,
+    query::Access,
     world::DeferredWorld,
 };
 
@@ -226,50 +227,50 @@ impl Observers {
         archetypes: &Archetypes,
         source: ArchetypeId,
         target: ArchetypeId,
-        keep: &[ComponentId],
-        replace: &[ComponentId],
+        changed: &[ComponentId],
+        existing: &[ComponentId],
     ) -> Arc<ArchetypeEdgeObservers> {
         let source = archetypes[source].observers.clone();
         let target = archetypes[target].observers.clone();
 
-        // TODO: need to also fire if components change!
-        // ... this is tricky because the edge is *shared* between InsertMode::Keep and InsertMode::Replace
-        // so we need separate lists?
-        // note that we need to check components even for Keep because it may fire on Option or Has
-        // the replace list is a *superset* of the other, so maybe keep them as diffs?
-        // no, easier to duplicate
-
-        // We need an Access... so maybe replace the EntitySet with an EntityMap<Access> ???
-        // then we'd have it here
-
-        // TODO: We need two *different* matches fns
-        //  new components trigger on both read or archetypal access and on both replace and keep (which are the same)
-        //  existing components only trigger on *read* access, not *archetypal*, and only on replace
-        //   because replacing them doesn't affect the value of `Has`
-        let matches = |components, observer| false;
-
         let mut enter_keep = Vec::new();
         let mut enter_replace = Vec::new();
-        for runnable_observer in target.iter_enter() {
-            if !source.enter.contains_key(&runnable_observer.observer)
-                || matches(keep, runnable_observer.observer)
-            {
+        for (&observer, state) in &target.enter {
+            let runnable_observer = RunnableObserver {
+                observer,
+                runner: state.runner,
+            };
+            // Trigger the observer either if it did not match the old archetype,
+            // or if the values it queries will have changed.
+            // A component that is inserted or removed will trigger any observer
+            // that has read (&T) or archetypal (Has<T>) access.
+            // An existing component will only trigger observers with read (&T) access,
+            // and only trigger them when using `InsertMode::Replace`.
+            if !source.enter.contains_key(&observer) || state.matches_changed(changed) {
                 enter_keep.push(runnable_observer);
                 enter_replace.push(runnable_observer);
-            } else if matches(replace, runnable_observer.observer) {
+            } else if state.matches_existing(existing) {
                 enter_replace.push(runnable_observer);
             }
         }
 
         let mut leave_keep = Vec::new();
         let mut leave_replace = Vec::new();
-        for runnable_observer in source.iter_leave() {
-            if !target.leave.contains_key(&runnable_observer.observer)
-                || matches(keep, runnable_observer.observer)
-            {
+        for (&observer, state) in &target.leave {
+            let runnable_observer = RunnableObserver {
+                observer,
+                runner: state.runner,
+            };
+            // Trigger the observer either if it does not match the new archetype,
+            // or if the values it queries will have changed.
+            // A component that is inserted or removed will trigger any observer
+            // that has read (&T) or archetypal (Has<T>) access.
+            // An existing component will only trigger observers with read (&T) access,
+            // and only trigger them when using `InsertMode::Replace`.
+            if !target.leave.contains_key(&observer) || state.matches_changed(changed) {
                 leave_keep.push(runnable_observer);
                 leave_replace.push(runnable_observer);
-            } else if matches(replace, runnable_observer.observer) {
+            } else if state.matches_existing(existing) {
                 leave_replace.push(runnable_observer);
             }
         }
@@ -356,23 +357,39 @@ pub(crate) struct RunnableObserver {
 // that's where we use the internals
 // archetype graph just needs the largely-public API of iterating edge observers
 
+struct ArchetypeObserverState {
+    runner: ObserverRunner,
+    access: Access<ComponentId>,
+}
+
+impl ArchetypeObserverState {
+    fn matches_changed(&self, components: &[ComponentId]) -> bool {}
+    fn matches_existing(&self, components: &[ComponentId]) -> bool {}
+}
+
 /// A set of query observers that observe a specific archetype.
 pub(crate) struct ArchetypeObservers {
-    enter: EntityIndexMap<ObserverRunner>,
-    leave: EntityIndexMap<ObserverRunner>,
+    enter: EntityIndexMap<ArchetypeObserverState>,
+    leave: EntityIndexMap<ArchetypeObserverState>,
 }
 
 impl ArchetypeObservers {
     pub fn iter_enter(&self) -> impl Iterator<Item = RunnableObserver> {
         self.enter
             .iter()
-            .map(|(&observer, &runner)| RunnableObserver { observer, runner })
+            .map(|(&observer, state)| RunnableObserver {
+                observer,
+                runner: state.runner,
+            })
     }
 
     pub fn iter_leave(&self) -> impl Iterator<Item = RunnableObserver> {
         self.leave
             .iter()
-            .map(|(&observer, &runner)| RunnableObserver { observer, runner })
+            .map(|(&observer, state)| RunnableObserver {
+                observer,
+                runner: state.runner,
+            })
     }
 }
 
