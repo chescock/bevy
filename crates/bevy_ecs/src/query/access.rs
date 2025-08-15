@@ -987,6 +987,7 @@ impl<T: SparseSetIndex> From<FilteredAccess<T>> for FilteredAccessSet<T> {
 }
 
 impl<T: SparseSetIndex> FilteredAccess<T> {
+    /// Returns `true` if this filter matches a set of components. Otherwise, returns `false`.
     pub fn matches_component_set(&self, set_contains_id: &impl Fn(ComponentId) -> bool) -> bool {
         self.filter_sets.iter().any(|set| {
             set.with

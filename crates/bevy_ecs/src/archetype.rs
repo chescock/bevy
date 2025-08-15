@@ -134,6 +134,7 @@ pub(crate) enum ComponentStatus {
     Existing,
 }
 
+/// Used in [`Edges`] for removes to store the observers to trigger on the remove alongside the new [`ArchetypeId`].
 #[derive(Clone)]
 pub struct ArchetypeWithEdgeObservers {
     /// The target archetype after the bundle is inserted into the source archetype.

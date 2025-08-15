@@ -425,7 +425,10 @@ pub struct ArchetypeEdgeObservers {
 }
 
 impl ArchetypeEdgeObservers {
-    pub fn is_valid(
+    /// Whether this edge was calculated using the current set of archetype observers for the source and target archetype.
+    ///
+    /// If this returns `false`, the caller will need to call [`Observers::get_edge_observers`] to recalculate the set of observers.
+    pub(crate) fn is_valid(
         &self,
         source: &Arc<ArchetypeObservers>,
         target: &Arc<ArchetypeObservers>,
