@@ -363,12 +363,23 @@ struct ArchetypeObserverState {
 }
 
 impl ArchetypeObserverState {
-    fn matches_changed(&self, components: &[ComponentId]) -> bool {}
-    fn matches_existing(&self, components: &[ComponentId]) -> bool {}
+    fn matches_changed(&self, components: &[ComponentId]) -> bool {
+        components
+            .iter()
+            .any(|&c| self.access.has_component_read(c) || self.access.has_archetypal(c))
+    }
+
+    fn matches_existing(&self, components: &[ComponentId]) -> bool {
+        components
+            .iter()
+            .any(|&c| self.access.has_component_read(c))
+    }
 }
 
 /// A set of query observers that observe a specific archetype.
 pub(crate) struct ArchetypeObservers {
+    // TODO: no, just store ObserverRunner here!
+    //  store the access centrally and do a hashmap lookup every time
     enter: EntityIndexMap<ArchetypeObserverState>,
     leave: EntityIndexMap<ArchetypeObserverState>,
 }
