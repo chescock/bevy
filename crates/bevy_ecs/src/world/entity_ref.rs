@@ -2578,11 +2578,8 @@ impl<'w> EntityWorldMut<'w> {
             Observers::invoke_query_observers(
                 deferred_world.reborrow(),
                 REPLACE,
-                InsertMode::Keep,
                 self.entity,
-                // TODO: What observers to fire here?
-                //  every 'leave' observer for the archetype - no need for edge calculations!
-                todo!(),
+                archetype.observers.iter_leave(),
                 caller,
             );
 

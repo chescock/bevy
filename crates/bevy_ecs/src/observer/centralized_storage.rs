@@ -15,7 +15,7 @@ use crate::{
     archetype::{ArchetypeFlags, ArchetypeId, Archetypes},
     change_detection::MaybeLocation,
     component::ComponentId,
-    entity::{EntityHashMap, EntityIndexSet},
+    entity::{EntityHashMap, EntityIndexMap},
     observer::{ObserverRunner, ObserverTrigger},
     prelude::*,
     world::DeferredWorld,
@@ -76,20 +76,25 @@ impl Observers {
     pub(crate) fn invoke_query_observers(
         mut world: DeferredWorld,
         event_key: EventKey,
-        insert_mode: crate::bundle::InsertMode,
         target: Entity,
-        observers: &ArchetypeEdgeObservers,
+        observers: impl IntoIterator<Item = RunnableObserver>,
         caller: MaybeLocation,
     ) {
-        // TODO: Make this take iterators instead of the edge
-        // for spawn/despawn, we get them from the observer set instead of the edge
-        // this means we need to clone the runner in a lot of places!
-        // which is fine, since it's a fn pointer and we're just doing a fat pointer manually
-        // ... at which point, give that type a name? and move this method there instead of here or world?
-        // we're just planning a `for` loop
-        //
-        // `observer.invoke(world.reborrow(), INSERT, caller);`, right?
-        todo!()
+        for runnable_observer in observers {
+            (runnable_observer.runner)(
+                world.reborrow(),
+                ObserverTrigger {
+                    observer: runnable_observer.observer,
+                    event_key,
+                    components: Default::default(),
+                    current_target: Some(target),
+                    original_target: Some(target),
+                    caller,
+                },
+                (&mut ()).into(),
+                &mut false,
+            );
+        }
     }
 
     /// This will run the observers of the given `event_key`, targeting the given `entity` and `components`.
@@ -236,27 +241,36 @@ impl Observers {
 
         // We need an Access... so maybe replace the EntitySet with an EntityMap<Access> ???
         // then we'd have it here
+
+        // TODO: We need two *different* matches fns
+        //  new components trigger on both read or archetypal access and on both replace and keep (which are the same)
+        //  existing components only trigger on *read* access, not *archetypal*, and only on replace
+        //   because replacing them doesn't affect the value of `Has`
         let matches = |components, observer| false;
 
         let mut enter_keep = Vec::new();
         let mut enter_replace = Vec::new();
-        for &o in &target.enter {
-            if !source.enter.contains(&o) || matches(keep, o) {
-                enter_keep.push(o);
-                enter_replace.push(o);
-            } else if matches(replace, o) {
-                enter_replace.push(o);
+        for runnable_observer in target.iter_enter() {
+            if !source.enter.contains_key(&runnable_observer.observer)
+                || matches(keep, runnable_observer.observer)
+            {
+                enter_keep.push(runnable_observer);
+                enter_replace.push(runnable_observer);
+            } else if matches(replace, runnable_observer.observer) {
+                enter_replace.push(runnable_observer);
             }
         }
 
         let mut leave_keep = Vec::new();
         let mut leave_replace = Vec::new();
-        for &o in &source.leave {
-            if !target.leave.contains(&o) || matches(keep, o) {
-                leave_keep.push(o);
-                leave_replace.push(o);
-            } else if matches(replace, o) {
-                leave_replace.push(o);
+        for runnable_observer in source.iter_leave() {
+            if !target.leave.contains_key(&runnable_observer.observer)
+                || matches(keep, runnable_observer.observer)
+            {
+                leave_keep.push(runnable_observer);
+                leave_replace.push(runnable_observer);
+            } else if matches(replace, runnable_observer.observer) {
+                leave_replace.push(runnable_observer);
             }
         }
 
@@ -332,14 +346,34 @@ impl CachedComponentObservers {
     }
 }
 
+#[derive(Copy, Clone)]
+pub(crate) struct RunnableObserver {
+    observer: Entity,
+    runner: ObserverRunner,
+}
+
 // TODO: Should these types be in Observers instead?
 // that's where we use the internals
 // archetype graph just needs the largely-public API of iterating edge observers
 
 /// A set of query observers that observe a specific archetype.
 pub(crate) struct ArchetypeObservers {
-    enter: EntityIndexSet,
-    leave: EntityIndexSet,
+    enter: EntityIndexMap<ObserverRunner>,
+    leave: EntityIndexMap<ObserverRunner>,
+}
+
+impl ArchetypeObservers {
+    pub fn iter_enter(&self) -> impl Iterator<Item = RunnableObserver> {
+        self.enter
+            .iter()
+            .map(|(&observer, &runner)| RunnableObserver { observer, runner })
+    }
+
+    pub fn iter_leave(&self) -> impl Iterator<Item = RunnableObserver> {
+        self.leave
+            .iter()
+            .map(|(&observer, &runner)| RunnableObserver { observer, runner })
+    }
 }
 
 /// A set of query observers that should trigger on a specific archetype edge.
@@ -350,10 +384,10 @@ pub struct ArchetypeEdgeObservers {
     /// The set of query observers on the target archetype.
     /// If this does not match the current value, then this value is stale and should be recalculated.
     target: Arc<ArchetypeObservers>,
-    enter_keep: Vec<Entity>,
-    enter_replace: Vec<Entity>,
-    leave_keep: Vec<Entity>,
-    leave_replace: Vec<Entity>,
+    pub(crate) enter_keep: Vec<RunnableObserver>,
+    pub(crate) enter_replace: Vec<RunnableObserver>,
+    pub(crate) leave_keep: Vec<RunnableObserver>,
+    pub(crate) leave_replace: Vec<RunnableObserver>,
 }
 
 impl ArchetypeEdgeObservers {

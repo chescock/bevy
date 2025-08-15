@@ -167,13 +167,13 @@ impl<'w> DeferredWorld<'w> {
             //  so if we can get a `BundleId` then we can use the cache there
             // Bundles::init_component_info ??? creates a dynamic bundle for a single component id, which is what we need here
 
+            let observers: [crate::observer::RunnableObserver; 0] = todo!();
             Observers::invoke_query_observers(
                 self.reborrow(),
                 REPLACE,
-                crate::bundle::InsertMode::Replace,
                 entity,
                 // TODO: What observers to fire here?
-                todo!(),
+                observers,
                 MaybeLocation::caller(),
             );
 
@@ -232,13 +232,13 @@ impl<'w> DeferredWorld<'w> {
                     MaybeLocation::caller(),
                 );
             }
+            let observers: [crate::observer::RunnableObserver; 0] = todo!();
             Observers::invoke_query_observers(
                 self.reborrow(),
                 INSERT,
-                crate::bundle::InsertMode::Replace,
                 entity,
                 // TODO: What observers to fire here?
-                todo!(),
+                observers,
                 MaybeLocation::caller(),
             );
         }

@@ -163,12 +163,15 @@ impl<'w> BundleInserter<'w> {
             // SAFETY: Mutable references do not alias and will be dropped after this block
             let mut deferred_world = self.world.into_deferred();
 
+            let observers = match insert_mode {
+                InsertMode::Replace => &archetype_after_insert.observers.leave_replace,
+                InsertMode::Keep => &archetype_after_insert.observers.leave_keep,
+            };
             Observers::invoke_query_observers(
                 deferred_world.reborrow(),
                 REPLACE,
-                insert_mode,
                 entity,
-                &archetype_after_insert.observers,
+                observers.iter().copied(),
                 caller,
             );
 
@@ -406,12 +409,15 @@ impl<'w> BundleInserter<'w> {
                 }
             }
 
+            let observers = match insert_mode {
+                InsertMode::Replace => &archetype_after_insert.observers.enter_replace,
+                InsertMode::Keep => &archetype_after_insert.observers.enter_keep,
+            };
             Observers::invoke_query_observers(
-                deferred_world.reborrow(),
+                deferred_world,
                 INSERT,
-                insert_mode,
                 entity,
-                &archetype_after_insert.observers,
+                observers.iter().copied(),
                 caller,
             );
         }

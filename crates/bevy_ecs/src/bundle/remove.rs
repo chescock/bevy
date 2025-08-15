@@ -157,9 +157,8 @@ impl<'w> BundleRemover<'w> {
             Observers::invoke_query_observers(
                 deferred_world.reborrow(),
                 REPLACE,
-                super::InsertMode::Keep,
                 entity,
-                self.observers.as_ref(),
+                self.observers.as_ref().leave_keep.iter().copied(),
                 caller,
             );
             if self.old_archetype.as_ref().has_replace_observer() {

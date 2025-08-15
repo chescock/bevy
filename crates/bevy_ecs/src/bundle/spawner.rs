@@ -21,7 +21,6 @@ pub(crate) struct BundleSpawner<'w> {
     bundle_info: ConstNonNull<BundleInfo>,
     table: NonNull<Table>,
     archetype: NonNull<Archetype>,
-    observers: NonNull<ArchetypeEdgeObservers>,
     change_tick: Tick,
 }
 
@@ -63,9 +62,6 @@ impl<'w> BundleSpawner<'w> {
             bundle_info: bundle_info.into(),
             table: table.into(),
             archetype: archetype.into(),
-            // TODO: What observers to fire here?
-            //  every 'enter' observer for the archetype - no need for edge calculations!
-            observers: todo!(),
             change_tick,
             world: world.as_unsafe_world_cell(),
         };
@@ -163,11 +159,10 @@ impl<'w> BundleSpawner<'w> {
                 );
             }
             Observers::invoke_query_observers(
-                deferred_world.reborrow(),
-                ADD,
-                InsertMode::Keep,
+                deferred_world,
+                INSERT,
                 entity,
-                self.observers.as_ref(),
+                archetype.observers.iter_enter(),
                 caller,
             );
         };
