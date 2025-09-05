@@ -14,7 +14,6 @@ use bevy::{
     picking::hover::Hovered,
     prelude::*,
     ui::{Checked, InteractionDisabled, Pressed},
-    winit::WinitSettings,
 };
 
 fn main() {
@@ -25,8 +24,6 @@ fn main() {
             InputDispatchPlugin,
             TabNavigationPlugin,
         ))
-        // Only run the app when there is user input. This will significantly reduce CPU/GPU use.
-        .insert_resource(WinitSettings::desktop_app())
         .insert_resource(DemoWidgetStates { slider_value: 50.0 })
         .add_systems(Startup, setup)
         .add_observer(button_on_add_pressed)
@@ -161,7 +158,7 @@ fn button(asset_server: &AssetServer, on_click: Callback<In<Activate>>) -> impl 
 }
 
 fn button_on_add_pressed(
-    event: On<Add, Pressed>,
+    add: On<Add, Pressed>,
     mut buttons: Query<
         (
             &Hovered,
@@ -175,7 +172,7 @@ fn button_on_add_pressed(
     mut text_query: Query<&mut Text>,
 ) {
     if let Ok((hovered, disabled, mut color, mut border_color, children)) =
-        buttons.get_mut(event.entity())
+        buttons.get_mut(add.entity)
     {
         let mut text = text_query.get_mut(children[0]).unwrap();
         set_button_style(
@@ -190,7 +187,7 @@ fn button_on_add_pressed(
 }
 
 fn button_on_remove_pressed(
-    event: On<Remove, Pressed>,
+    remove: On<Remove, Pressed>,
     mut buttons: Query<
         (
             &Hovered,
@@ -204,7 +201,7 @@ fn button_on_remove_pressed(
     mut text_query: Query<&mut Text>,
 ) {
     if let Ok((hovered, disabled, mut color, mut border_color, children)) =
-        buttons.get_mut(event.entity())
+        buttons.get_mut(remove.entity)
     {
         let mut text = text_query.get_mut(children[0]).unwrap();
         set_button_style(
@@ -219,7 +216,7 @@ fn button_on_remove_pressed(
 }
 
 fn button_on_add_disabled(
-    event: On<Add, InteractionDisabled>,
+    add: On<Add, InteractionDisabled>,
     mut buttons: Query<
         (
             Has<Pressed>,
@@ -233,7 +230,7 @@ fn button_on_add_disabled(
     mut text_query: Query<&mut Text>,
 ) {
     if let Ok((pressed, hovered, mut color, mut border_color, children)) =
-        buttons.get_mut(event.entity())
+        buttons.get_mut(add.entity)
     {
         let mut text = text_query.get_mut(children[0]).unwrap();
         set_button_style(
@@ -248,7 +245,7 @@ fn button_on_add_disabled(
 }
 
 fn button_on_remove_disabled(
-    event: On<Remove, InteractionDisabled>,
+    remove: On<Remove, InteractionDisabled>,
     mut buttons: Query<
         (
             Has<Pressed>,
@@ -262,7 +259,7 @@ fn button_on_remove_disabled(
     mut text_query: Query<&mut Text>,
 ) {
     if let Ok((pressed, hovered, mut color, mut border_color, children)) =
-        buttons.get_mut(event.entity())
+        buttons.get_mut(remove.entity)
     {
         let mut text = text_query.get_mut(children[0]).unwrap();
         set_button_style(
@@ -277,7 +274,7 @@ fn button_on_remove_disabled(
 }
 
 fn button_on_change_hover(
-    event: On<Insert, Hovered>,
+    insert: On<Insert, Hovered>,
     mut buttons: Query<
         (
             Has<Pressed>,
@@ -292,7 +289,7 @@ fn button_on_change_hover(
     mut text_query: Query<&mut Text>,
 ) {
     if let Ok((pressed, hovered, disabled, mut color, mut border_color, children)) =
-        buttons.get_mut(event.entity())
+        buttons.get_mut(insert.entity)
     {
         if children.is_empty() {
             return;
@@ -424,12 +421,12 @@ fn slider(
 }
 
 fn slider_on_add_disabled(
-    event: On<Add, InteractionDisabled>,
+    add: On<Add, InteractionDisabled>,
     sliders: Query<(Entity, &Hovered), With<DemoSlider>>,
     children: Query<&Children>,
     mut thumbs: Query<(&mut BackgroundColor, Has<DemoSliderThumb>), Without<DemoSlider>>,
 ) {
-    if let Ok((slider_ent, hovered)) = sliders.get(event.entity()) {
+    if let Ok((slider_ent, hovered)) = sliders.get(add.entity) {
         for child in children.iter_descendants(slider_ent) {
             if let Ok((mut thumb_bg, is_thumb)) = thumbs.get_mut(child)
                 && is_thumb
@@ -441,12 +438,12 @@ fn slider_on_add_disabled(
 }
 
 fn slider_on_remove_disabled(
-    event: On<Remove, InteractionDisabled>,
+    remove: On<Remove, InteractionDisabled>,
     sliders: Query<(Entity, &Hovered), With<DemoSlider>>,
     children: Query<&Children>,
     mut thumbs: Query<(&mut BackgroundColor, Has<DemoSliderThumb>), Without<DemoSlider>>,
 ) {
-    if let Ok((slider_ent, hovered)) = sliders.get(event.entity()) {
+    if let Ok((slider_ent, hovered)) = sliders.get(remove.entity) {
         for child in children.iter_descendants(slider_ent) {
             if let Ok((mut thumb_bg, is_thumb)) = thumbs.get_mut(child)
                 && is_thumb
@@ -458,12 +455,12 @@ fn slider_on_remove_disabled(
 }
 
 fn slider_on_change_hover(
-    event: On<Insert, Hovered>,
+    insert: On<Insert, Hovered>,
     sliders: Query<(Entity, &Hovered, Has<InteractionDisabled>), With<DemoSlider>>,
     children: Query<&Children>,
     mut thumbs: Query<(&mut BackgroundColor, Has<DemoSliderThumb>), Without<DemoSlider>>,
 ) {
-    if let Ok((slider_ent, hovered, disabled)) = sliders.get(event.entity()) {
+    if let Ok((slider_ent, hovered, disabled)) = sliders.get(insert.entity) {
         for child in children.iter_descendants(slider_ent) {
             if let Ok((mut thumb_bg, is_thumb)) = thumbs.get_mut(child)
                 && is_thumb
@@ -475,12 +472,12 @@ fn slider_on_change_hover(
 }
 
 fn slider_on_change_value(
-    event: On<Insert, SliderValue>,
+    insert: On<Insert, SliderValue>,
     sliders: Query<(Entity, &SliderValue, &SliderRange), With<DemoSlider>>,
     children: Query<&Children>,
     mut thumbs: Query<(&mut Node, Has<DemoSliderThumb>), Without<DemoSlider>>,
 ) {
-    if let Ok((slider_ent, value, range)) = sliders.get(event.entity()) {
+    if let Ok((slider_ent, value, range)) = sliders.get(insert.entity) {
         for child in children.iter_descendants(slider_ent) {
             if let Ok((mut thumb_node, is_thumb)) = thumbs.get_mut(child)
                 && is_thumb
@@ -492,12 +489,12 @@ fn slider_on_change_value(
 }
 
 fn slider_on_change_range(
-    event: On<Insert, SliderRange>,
+    insert: On<Insert, SliderRange>,
     sliders: Query<(Entity, &SliderValue, &SliderRange), With<DemoSlider>>,
     children: Query<&Children>,
     mut thumbs: Query<(&mut Node, Has<DemoSliderThumb>), Without<DemoSlider>>,
 ) {
-    if let Ok((slider_ent, value, range)) = sliders.get(event.entity()) {
+    if let Ok((slider_ent, value, range)) = sliders.get(insert.entity) {
         for child in children.iter_descendants(slider_ent) {
             if let Ok((mut thumb_node, is_thumb)) = thumbs.get_mut(child)
                 && is_thumb
@@ -580,23 +577,23 @@ fn checkbox(
 }
 
 fn checkbox_on_add_disabled(
-    event: On<Add, InteractionDisabled>,
+    add: On<Add, InteractionDisabled>,
     checkboxes: Query<(&Hovered, Has<Checked>, &Children), With<DemoCheckbox>>,
     mut borders: Query<(&mut BorderColor, &mut Children), Without<DemoCheckbox>>,
     mut marks: Query<&mut BackgroundColor, (Without<DemoCheckbox>, Without<Children>)>,
 ) {
-    if let Ok((hovered, checked, children)) = checkboxes.get(event.entity()) {
+    if let Ok((hovered, checked, children)) = checkboxes.get(add.entity) {
         set_checkbox_style(children, &mut borders, &mut marks, true, hovered.0, checked);
     }
 }
 
 fn checkbox_on_remove_disabled(
-    event: On<Remove, InteractionDisabled>,
+    remove: On<Remove, InteractionDisabled>,
     checkboxes: Query<(&Hovered, Has<Checked>, &Children), With<DemoCheckbox>>,
     mut borders: Query<(&mut BorderColor, &mut Children), Without<DemoCheckbox>>,
     mut marks: Query<&mut BackgroundColor, (Without<DemoCheckbox>, Without<Children>)>,
 ) {
-    if let Ok((hovered, checked, children)) = checkboxes.get(event.entity()) {
+    if let Ok((hovered, checked, children)) = checkboxes.get(remove.entity) {
         set_checkbox_style(
             children,
             &mut borders,
@@ -609,7 +606,7 @@ fn checkbox_on_remove_disabled(
 }
 
 fn checkbox_on_change_hover(
-    event: On<Insert, Hovered>,
+    insert: On<Insert, Hovered>,
     checkboxes: Query<
         (&Hovered, Has<InteractionDisabled>, Has<Checked>, &Children),
         With<DemoCheckbox>,
@@ -617,7 +614,7 @@ fn checkbox_on_change_hover(
     mut borders: Query<(&mut BorderColor, &mut Children), Without<DemoCheckbox>>,
     mut marks: Query<&mut BackgroundColor, (Without<DemoCheckbox>, Without<Children>)>,
 ) {
-    if let Ok((hovered, disabled, checked, children)) = checkboxes.get(event.entity()) {
+    if let Ok((hovered, disabled, checked, children)) = checkboxes.get(insert.entity) {
         set_checkbox_style(
             children,
             &mut borders,
@@ -630,7 +627,7 @@ fn checkbox_on_change_hover(
 }
 
 fn checkbox_on_add_checked(
-    event: On<Add, Checked>,
+    add: On<Add, Checked>,
     checkboxes: Query<
         (&Hovered, Has<InteractionDisabled>, Has<Checked>, &Children),
         With<DemoCheckbox>,
@@ -638,7 +635,7 @@ fn checkbox_on_add_checked(
     mut borders: Query<(&mut BorderColor, &mut Children), Without<DemoCheckbox>>,
     mut marks: Query<&mut BackgroundColor, (Without<DemoCheckbox>, Without<Children>)>,
 ) {
-    if let Ok((hovered, disabled, checked, children)) = checkboxes.get(event.entity()) {
+    if let Ok((hovered, disabled, checked, children)) = checkboxes.get(add.entity) {
         set_checkbox_style(
             children,
             &mut borders,
@@ -651,12 +648,12 @@ fn checkbox_on_add_checked(
 }
 
 fn checkbox_on_remove_checked(
-    event: On<Remove, Checked>,
+    remove: On<Remove, Checked>,
     checkboxes: Query<(&Hovered, Has<InteractionDisabled>, &Children), With<DemoCheckbox>>,
     mut borders: Query<(&mut BorderColor, &mut Children), Without<DemoCheckbox>>,
     mut marks: Query<&mut BackgroundColor, (Without<DemoCheckbox>, Without<Children>)>,
 ) {
-    if let Ok((hovered, disabled, children)) = checkboxes.get(event.entity()) {
+    if let Ok((hovered, disabled, children)) = checkboxes.get(remove.entity) {
         set_checkbox_style(
             children,
             &mut borders,

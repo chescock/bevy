@@ -598,13 +598,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
 bytemuck = "1"
 # The following explicit dependencies are needed for proc macros to work inside of examples as they are part of the bevy crate itself.
-bevy_render = { path = "crates/bevy_render", version = "0.17.0-dev", default-features = false }
-bevy_ecs = { path = "crates/bevy_ecs", version = "0.17.0-dev", default-features = false }
-bevy_state = { path = "crates/bevy_state", version = "0.17.0-dev", default-features = false }
+bevy_animation = { path = "crates/bevy_animation", version = "0.17.0-dev", default-features = false }
 bevy_asset = { path = "crates/bevy_asset", version = "0.17.0-dev", default-features = false }
-bevy_reflect = { path = "crates/bevy_reflect", version = "0.17.0-dev", default-features = false }
-bevy_image = { path = "crates/bevy_image", version = "0.17.0-dev", default-features = false }
+bevy_ecs = { path = "crates/bevy_ecs", version = "0.17.0-dev", default-features = false }
 bevy_gizmos = { path = "crates/bevy_gizmos", version = "0.17.0-dev", default-features = false }
+bevy_image = { path = "crates/bevy_image", version = "0.17.0-dev", default-features = false }
+bevy_reflect = { path = "crates/bevy_reflect", version = "0.17.0-dev", default-features = false }
+bevy_render = { path = "crates/bevy_render", version = "0.17.0-dev", default-features = false }
+bevy_state = { path = "crates/bevy_state", version = "0.17.0-dev", default-features = false }
 # Needed to poll Task examples
 futures-lite = "2.0.1"
 futures-timer = { version = "3", features = ["wasm-bindgen", "gloo-timers"] }
@@ -1340,7 +1341,7 @@ wasm = true
 name = "solari"
 path = "examples/3d/solari.rs"
 doc-scrape-examples = true
-required-features = ["bevy_solari"]
+required-features = ["bevy_solari", "https"]
 
 [package.metadata.example.solari]
 name = "Solari"
@@ -3705,6 +3706,17 @@ category = "UI (User Interface)"
 wasm = true
 
 [[example]]
+name = "ui_target_camera"
+path = "examples/ui/ui_target_camera.rs"
+doc-scrape-examples = true
+
+[package.metadata.example.ui_target_camera]
+name = "UI Target Camera"
+description = "Demonstrates how to use `UiTargetCamera` and camera ordering."
+category = "UI (User Interface)"
+wasm = true
+
+[[example]]
 name = "viewport_debug"
 path = "examples/ui/viewport_debug.rs"
 doc-scrape-examples = true
@@ -4666,3 +4678,14 @@ description = "Gallery of Feathers Widgets"
 category = "UI (User Interface)"
 wasm = true
 hidden = true
+
+[[example]]
+name = "render_depth_to_texture"
+path = "examples/shader_advanced/render_depth_to_texture.rs"
+doc-scrape-examples = true
+
+[package.metadata.example.render_depth_to_texture]
+name = "Render Depth to Texture"
+description = "Demonstrates how to use depth-only cameras"
+category = "Shaders"
+wasm = true
