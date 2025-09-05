@@ -151,16 +151,16 @@ pub(crate) struct ArchetypeAfterBundleInsert {
 }
 
 impl ArchetypeAfterBundleInsert {
-    pub(crate) fn iter_inserted(&self) -> impl Iterator<Item = ComponentId> + Clone + '_ {
-        self.inserted.iter().copied()
+    pub(crate) fn inserted(&self) -> &[ComponentId] {
+        &self.inserted
     }
 
-    pub(crate) fn iter_added(&self) -> impl Iterator<Item = ComponentId> + Clone + '_ {
-        self.inserted[..self.added_len].iter().copied()
+    pub(crate) fn added(&self) -> &[ComponentId] {
+        &self.inserted[..self.added_len]
     }
 
-    pub(crate) fn iter_existing(&self) -> impl Iterator<Item = ComponentId> + Clone + '_ {
-        self.inserted[self.added_len..].iter().copied()
+    pub(crate) fn existing(&self) -> &[ComponentId] {
+        &self.inserted[self.added_len..]
     }
 }
 
@@ -255,7 +255,7 @@ impl Edges {
                 bundle_status: bundle_status.into(),
                 required_components: required_components.into(),
                 added_len: added.len(),
-                inserted: added.into_iter().chain(existing.into_iter()).collect(),
+                inserted: added.into_iter().chain(existing).collect(),
             },
         );
     }
