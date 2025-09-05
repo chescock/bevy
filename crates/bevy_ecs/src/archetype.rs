@@ -142,24 +142,25 @@ pub(crate) struct ArchetypeAfterBundleInsert {
     ///
     /// The initial values are determined based on the provided constructor, falling back to the `Default` trait if none is given.
     pub required_components: Box<[RequiredComponentConstructor]>,
-    /// The components added by this bundle. This includes any Required Components that are inserted when adding this bundle.
-    added: Box<[ComponentId]>,
-    /// The components that were explicitly contributed by this bundle, but already existed in the archetype. This _does not_ include any
-    /// Required Components.
-    existing: Box<[ComponentId]>,
+    /// The components inserted by this bundle, with added components before existing ones.
+    /// Added components includes any Required Components that are inserted when adding this bundle,
+    /// but existing components only includes ones explicitly contributed by this bundle.
+    inserted: Box<[ComponentId]>,
+    /// The number of components inserted by this bundle, including Required Components.
+    added_len: usize,
 }
 
 impl ArchetypeAfterBundleInsert {
     pub(crate) fn iter_inserted(&self) -> impl Iterator<Item = ComponentId> + Clone + '_ {
-        self.added.iter().chain(self.existing.iter()).copied()
+        self.inserted.iter().copied()
     }
 
     pub(crate) fn iter_added(&self) -> impl Iterator<Item = ComponentId> + Clone + '_ {
-        self.added.iter().copied()
+        self.inserted[..self.added_len].iter().copied()
     }
 
     pub(crate) fn iter_existing(&self) -> impl Iterator<Item = ComponentId> + Clone + '_ {
-        self.existing.iter().copied()
+        self.inserted[self.added_len..].iter().copied()
     }
 }
 
@@ -244,8 +245,8 @@ impl Edges {
         archetype_id: ArchetypeId,
         bundle_status: impl Into<Box<[ComponentStatus]>>,
         required_components: impl Into<Box<[RequiredComponentConstructor]>>,
-        added: impl Into<Box<[ComponentId]>>,
-        existing: impl Into<Box<[ComponentId]>>,
+        added: Vec<ComponentId>,
+        existing: impl IntoIterator<Item = ComponentId>,
     ) {
         self.insert_bundle.insert(
             bundle_id,
@@ -253,8 +254,8 @@ impl Edges {
                 archetype_id,
                 bundle_status: bundle_status.into(),
                 required_components: required_components.into(),
-                added: added.into(),
-                existing: existing.into(),
+                added_len: added.len(),
+                inserted: added.into_iter().chain(existing.into_iter()).collect(),
             },
         );
     }
