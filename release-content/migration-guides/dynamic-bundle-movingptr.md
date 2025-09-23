@@ -1,5 +1,5 @@
 ---
-title: `DynamicBundle`
+title: "`DynamicBundle`"
 pull_requests: [20772, 20877]
 ---
 
