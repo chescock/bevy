@@ -24,7 +24,9 @@ struct MySpawnableList<A: Bundle, B: Bundle> {
     b: B,
 }
 let my_ptr: MovingPtr<'_, MySpawnableList<u32, String>> = ...;
-deconstruct_moving_ptr!(my_ptr => { a, b, });
+deconstruct_moving_ptr!({
+    let MySpawnableList { a, b } = my_ptr;
+});
 let a_ptr: MovingPtr<'_, u32> = a;
 let b_ptr: MovingPtr<'_, String> = b;
 ```
@@ -60,8 +62,10 @@ or only read the fields you need with `deconstruct_moving_ptr!`:
 ```rust
     fn spawn(this: MovingPtr<'_, Self>, world: &mut World, entity: Entity) {
         unsafe {
-            // Only `a` is kept, `b` will be forgotten without being dropped!
-            deconstruct_moving_ptr!(this => { a, });
+            // `a` is read, but `b` will be dropped in place without being copied to the stack
+            deconstruct_moving_ptr!({
+                let MySpawnableList { a, b: _ } = this;
+            });
             let a = a.read();
             world.spawn((R::from(entity), a));
         }
