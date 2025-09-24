@@ -260,7 +260,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         D::provide_extra_access(
             &mut fetch_state,
             component_access.access_mut(),
-            builder.access().access(),
+            builder.access(),
         );
 
         let mut component_access = builder.access().clone();
@@ -663,7 +663,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         NewD::provide_extra_access(
             &mut fetch_state,
             component_access.access_mut(),
-            self_access.access(),
+            &self_access,
         );
 
         let mut filter_component_access = FilteredAccess::default();
@@ -781,7 +781,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         NewD::provide_extra_access(
             &mut new_fetch_state,
             component_access.access_mut(),
-            joined_component_access.access(),
+            &joined_component_access,
         );
 
         let mut new_filter_component_access = FilteredAccess::default();

@@ -309,7 +309,7 @@ pub unsafe trait QueryData: WorldQuery {
     fn provide_extra_access(
         _state: &mut Self::State,
         _access: &mut Access,
-        _available_access: &Access,
+        _available_access: &FilteredAccess,
     ) {
     }
 
@@ -1000,12 +1000,12 @@ unsafe impl QueryData for FilteredEntityRef<'_, '_> {
     fn provide_extra_access(
         state: &mut Self::State,
         access: &mut Access,
-        available_access: &Access,
+        available_access: &FilteredAccess,
     ) {
         // Claim any extra access that doesn't conflict with other subqueries
         // This is used when constructing a `QueryLens` or creating a query from a `QueryBuilder`
         // Start with the entire available access, since that is the most we can possibly access
-        state.clone_from(available_access);
+        state.clone_from(available_access.access());
         // Prevent all writes, since `FilteredEntityRef` only performs read access
         state.clear_writes();
         // Prevent any access that would conflict with other accesses in the current query
@@ -1118,12 +1118,12 @@ unsafe impl<'a, 'b> QueryData for FilteredEntityMut<'a, 'b> {
     fn provide_extra_access(
         state: &mut Self::State,
         access: &mut Access,
-        available_access: &Access,
+        available_access: &FilteredAccess,
     ) {
         // Claim any extra access that doesn't conflict with other subqueries
         // This is used when constructing a `QueryLens` or creating a query from a `QueryBuilder`
         // Start with the entire available access, since that is the most we can possibly access
-        state.clone_from(available_access);
+        state.clone_from(available_access.access());
         // Prevent any access that would conflict with other accesses in the current query
         state.remove_conflicting_access(access);
         // Finally, add the resulting access to the query access
@@ -2467,6 +2467,212 @@ impl<T: Component> ReleaseStateQueryData for Has<T> {
     }
 }
 
+/// A [`QueryData`] wrapper that only returns data when provided with extra access
+/// through [query transmutes](crate::system::Query::transmute_lens) or [`QueryBuilder`](crate::query::QueryBuilder).
+///
+/// When the source query or builder has the access required by the inner query,
+/// following the rules for [allowed transmutes],
+/// this will result in a query that always returns the value of the inner query wrapped in `Some`.
+///
+/// When the source query or builder does not have that access,
+/// or when used as an ordinary system parameter,
+/// this will result in a query that always returns `None`.
+///
+/// [allowed transmutes]: crate::system::Query#allowed-transmutes
+///
+/// # Examples
+///
+/// ```
+/// # use bevy_ecs::prelude::*;
+/// # use bevy_ecs::query::IfAccess;
+/// # use bevy_ecs::world::FilteredEntityMut;
+/// #
+/// # #[derive(Component)]
+/// # struct Name;
+/// #
+/// # let mut world = World::new();
+/// # world.spawn(Name);
+/// # let name_component_id = world.register_component::<Name>();
+/// // When created without a transmute or query builder, it always returns `None`.
+/// let mut state = world.query::<IfAccess<&Name>>();
+/// assert!(matches!(state.query(&world).single_inner(), Ok(None)));
+///
+/// // Transmuting from a query with the required access always returns `Some`.
+/// let mut state = world.query::<&Name>().transmute::<IfAccess<&Name>>(&world);
+/// assert!(matches!(state.query(&world).single_inner(), Ok(Some(Name))));
+///
+/// // Transmuting from a query without the required access always returns `None`.
+/// let mut state = world.query::<()>().transmute::<IfAccess<&Name>>(&world);
+/// assert!(matches!(state.query(&world).single_inner(), Ok(None)));
+///
+/// // Note that while `EntityMut` has 'read' and 'write' access to all components,
+/// // it does not have 'required' access, since it may match entities without the components.
+/// let mut state = world.query::<EntityMut>().transmute::<IfAccess<&Name>>(&world);
+/// assert!(matches!(state.query(&world).single_inner(), Ok(None)));
+/// // You can wrap the inner query in `Option` to allow the transmute.
+/// let mut state = world.query::<EntityMut>().transmute::<IfAccess<Option<&Name>>>(&world);
+/// assert!(matches!(state.query(&world).single_inner(), Ok(Some(Some(Name)))));
+///
+/// // If used with `FilteredEntityRef` or `FilteredEntityMut`,
+/// // put `IfAccess` first so that it claims the access first:
+/// //
+/// // Here the `FilteredEntityMut` takes `&mut Name` access,
+/// // leaving none for `IfAccess<&Name>`.
+/// let mut state = world
+///     .query::<&mut Name>()
+///     .transmute::<(FilteredEntityMut, IfAccess<&Name>)>(&world);
+/// let (entity, if_access) = state.query(&world).single_inner().unwrap();
+/// assert!(entity.access().has_component_write(name_component_id));
+/// assert!(matches!(if_access, None));
+/// // Here the `IfAccess<&Name>` takes `&Name` access,
+/// // leaving shared access for `FilteredEntityMut`.
+/// let mut state = world
+///     .query::<&mut Name>()
+///     .transmute::<(IfAccess<&Name>, FilteredEntityMut)>(&world);
+/// let (if_access, entity) = state.query(&world).single_inner().unwrap();
+/// assert!(entity.access().has_component_read(name_component_id));
+/// assert!(!entity.access().has_component_write(name_component_id));
+/// assert!(matches!(if_access, Some(Name)));
+/// ```
+pub struct IfAccess<T>(T);
+
+/// The [`WorldQuery::State`] type for [`IfAccess`].
+#[doc(hidden)]
+pub struct IfAccessState<T> {
+    inner: T,
+    has_access: bool,
+}
+
+// SAFETY:
+// This only performs access if `state.has_access` is `true`, which is only set in
+// `provide_extra_access` after ensuring there were no conflicts and adding the access.
+unsafe impl<T: QueryData> WorldQuery for IfAccess<T> {
+    type Fetch<'w> = Option<T::Fetch<'w>>;
+
+    type State = IfAccessState<T::State>;
+
+    fn shrink_fetch<'wlong: 'wshort, 'wshort>(fetch: Self::Fetch<'wlong>) -> Self::Fetch<'wshort> {
+        fetch.map(T::shrink_fetch)
+    }
+
+    unsafe fn init_fetch<'w, 's>(
+        world: UnsafeWorldCell<'w>,
+        state: &'s Self::State,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> Self::Fetch<'w> {
+        // SAFETY:
+        // - Caller ensures `world` matches
+        // - `has_access` is only set to `true` by `provide_extra_access`,
+        //   which ensures that this query has the access registered by `T::init_state`
+        state
+            .has_access
+            .then(|| unsafe { T::init_fetch(world, &state.inner, last_run, this_run) })
+    }
+
+    // The query can be dense even if `T` is sparse.
+    // `IfAccess` won't try to fetch `T` unless the access check passes,
+    // and that will only happen for a sparse `T` if the access forces a sparse query.
+    const IS_DENSE: bool = false;
+
+    unsafe fn set_archetype<'w, 's>(
+        fetch: &mut Self::Fetch<'w>,
+        state: &'s Self::State,
+        archetype: &'w Archetype,
+        table: &'w Table,
+    ) {
+        if let Some(fetch) = fetch {
+            // SAFETY: The invariants are upheld by the caller.
+            unsafe { T::set_archetype(fetch, &state.inner, archetype, table) };
+        }
+    }
+
+    unsafe fn set_table<'w, 's>(
+        fetch: &mut Self::Fetch<'w>,
+        state: &'s Self::State,
+        table: &'w Table,
+    ) {
+        if let Some(fetch) = fetch {
+            // SAFETY: The invariants are upheld by the caller.
+            unsafe { T::set_table(fetch, &state.inner, table) };
+        }
+    }
+
+    fn update_component_access(_state: &Self::State, _access: &mut FilteredAccess) {}
+
+    fn init_state(world: &mut World) -> Self::State {
+        IfAccessState {
+            inner: T::init_state(world),
+            has_access: false,
+        }
+    }
+
+    fn get_state(components: &Components) -> Option<Self::State> {
+        T::get_state(components).map(|inner| IfAccessState {
+            inner,
+            has_access: false,
+        })
+    }
+
+    fn matches_component_set(
+        state: &Self::State,
+        set_contains_id: &impl Fn(ComponentId) -> bool,
+    ) -> bool {
+        !state.has_access || T::matches_component_set(&state.inner, set_contains_id)
+    }
+}
+
+// SAFETY:
+// - `IfAccess<T>` and `IfAccess<T::ReadOnly>` have the same access as `T` and `T::ReadOnly`
+// - `Self: ReadOnlyQueryData` if and only if `T: ReadOnlyQueryData`, which is true if and only if `T::IS_READ_ONLY`
+unsafe impl<T: QueryData> QueryData for IfAccess<T> {
+    const IS_READ_ONLY: bool = T::IS_READ_ONLY;
+    type ReadOnly = IfAccess<T::ReadOnly>;
+    type Item<'w, 's> = Option<T::Item<'w, 's>>;
+
+    fn shrink<'wlong: 'wshort, 'wshort, 's>(
+        item: Self::Item<'wlong, 's>,
+    ) -> Self::Item<'wshort, 's> {
+        item.map(T::shrink)
+    }
+
+    #[inline(always)]
+    unsafe fn fetch<'w, 's>(
+        state: &'s Self::State,
+        fetch: &mut Self::Fetch<'w>,
+        entity: Entity,
+        table_row: TableRow,
+    ) -> Self::Item<'w, 's> {
+        // SAFETY: The invariants are upheld by the caller.
+        fetch
+            .as_mut()
+            .map(|fetch| unsafe { T::fetch(&state.inner, fetch, entity, table_row) })
+    }
+
+    fn provide_extra_access(
+        state: &mut Self::State,
+        access: &mut Access,
+        available_access: &FilteredAccess,
+    ) {
+        let mut needed_access = FilteredAccess::matches_everything();
+        T::update_component_access(&state.inner, &mut needed_access);
+        if needed_access.is_subset(available_access) && needed_access.access().is_compatible(access)
+        {
+            state.has_access = true;
+            access.extend(needed_access.access());
+        }
+    }
+}
+
+// SAFETY: `T` is read-only, and `IfAccess` either performs the access for `T` or none at all
+unsafe impl<T: ReadOnlyQueryData> ReadOnlyQueryData for IfAccess<T> {}
+
+impl<T: ReleaseStateQueryData> ReleaseStateQueryData for IfAccess<T> {
+    fn release_state<'w>(item: Self::Item<'w, '_>) -> Self::Item<'w, 'static> {
+        item.map(T::release_state)
+    }
+}
+
 /// The `AnyOf` query parameter fetches entities with any of the component types included in T.
 ///
 /// `Query<AnyOf<(&A, &B, &mut C)>>` is equivalent to `Query<(Option<&A>, Option<&B>, Option<&mut C>), Or<(With<A>, With<B>, With<C>)>>`.
@@ -2510,7 +2716,7 @@ macro_rules! impl_tuple_query_data {
             fn provide_extra_access(
                 state: &mut Self::State,
                 access: &mut Access,
-                available_access: &Access,
+                available_access: &FilteredAccess,
             ) {
                 let ($($name,)*) = state;
                 $($name::provide_extra_access($name, access, available_access);)*
