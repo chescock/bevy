@@ -8,6 +8,7 @@ mod filter;
 mod iter;
 mod par_iter;
 mod state;
+mod unsafe_query;
 mod world_query;
 
 pub use access::*;
@@ -19,6 +20,7 @@ pub use filter::*;
 pub use iter::*;
 pub use par_iter::*;
 pub use state::*;
+pub use unsafe_query::*;
 pub use world_query::*;
 
 /// A debug checked version of [`Option::unwrap_unchecked`]. Will panic in

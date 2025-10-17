@@ -4,7 +4,9 @@ use crate::{
     entity::{Entity, EntityEquivalent, EntitySet, UniqueEntityArray},
     entity_disabling::DefaultQueryFilters,
     prelude::FromWorld,
-    query::{FilteredAccess, QueryCombinationIter, QueryIter, QueryParIter, WorldQuery},
+    query::{
+        FilteredAccess, QueryCombinationIter, QueryIter, QueryParIter, UnsafeQuery, WorldQuery,
+    },
     storage::{SparseSetIndex, TableId},
     system::Query,
     world::{unsafe_world_cell::UnsafeWorldCell, World, WorldId},
@@ -419,7 +421,43 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // SAFETY:
         // - The caller ensured we have the correct access to the world.
         // - The caller ensured that the world matches.
-        unsafe { Query::new(world, self, last_run, this_run) }
+        unsafe { Query::new(UnsafeQuery::new(world, self, last_run, this_run)) }
+    }
+
+    /// Creates an [`UnsafeQuery`] from the given [`QueryState`] and [`World`].
+    pub fn unsafe_query<'w, 's>(
+        &'s mut self,
+        world: UnsafeWorldCell<'w>,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> UnsafeQuery<'w, 's, D, F> {
+        self.update_archetypes_unsafe_world_cell(world);
+        // SAFETY: We called `update_archetypes_unsafe_world_cell`, which calls `validate_world`.
+        unsafe { self.unsafe_query_manual(world, last_run, this_run) }
+    }
+
+    /// Creates an [`UnsafeQuery`] from the given [`QueryState`] and [`World`].
+    ///
+    /// This method is slightly more efficient than [`QueryState::unsafe_query`] in some situations, since
+    /// it does not update this instance's internal cache. The resulting query may skip an entity that
+    /// belongs to an archetype that has not been cached.
+    ///
+    /// To ensure that the cache is up to date, call [`QueryState::update_archetypes`] before this method.
+    /// The cache is also updated in [`QueryState::new`], [`QueryState::get`], or any method with mutable
+    /// access to `self`.
+    ///
+    /// # Safety
+    ///
+    /// This does not validate that `world.id()` matches `self.world_id`. Calling this on a `world`
+    /// with a mismatched [`WorldId`] is unsound.
+    pub unsafe fn unsafe_query_manual<'w, 's>(
+        &'s self,
+        world: UnsafeWorldCell<'w>,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> UnsafeQuery<'w, 's, D, F> {
+        // SAFETY: The caller ensured that the world matches.
+        unsafe { UnsafeQuery::new(world, self, last_run, this_run) }
     }
 
     /// Checks if the query is empty for the given [`World`], where the last change and current tick are given.
