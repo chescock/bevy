@@ -92,7 +92,7 @@ pub trait Node: Downcast + Send + Sync + 'static {
     /// optionally queues up subgraphs for execution. The graph data, input and output values are
     /// passed via the [`RenderGraphContext`].
     fn run<'w>(
-        &self,
+        &'w self,
         graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
         world: &'w World,
@@ -366,7 +366,7 @@ pub trait ViewNode {
         &self,
         graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
-        view_query: QueryItem<'w, '_, Self::ViewQuery>,
+        view_query: QueryItem<'w, 'w, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError>;
 }
@@ -405,7 +405,7 @@ where
     }
 
     fn run<'w>(
-        &self,
+        &'w self,
         graph: &mut RenderGraphContext,
         render_context: &mut RenderContext<'w>,
         world: &'w World,

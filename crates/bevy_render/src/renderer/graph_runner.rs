@@ -102,7 +102,7 @@ impl RenderGraphRunner {
     /// Runs the [`RenderGraph`] and all its sub-graphs sequentially, making sure that all nodes are
     /// run in the correct order. (a node only runs when all its dependencies have finished running)
     fn run_graph<'w>(
-        graph: &RenderGraph,
+        graph: &'w RenderGraph,
         sub_graph: Option<InternedRenderSubGraph>,
         render_context: &mut RenderContext<'w>,
         world: &'w World,
