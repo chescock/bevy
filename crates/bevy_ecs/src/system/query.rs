@@ -488,23 +488,18 @@ use core::{
 /// ```
 ///
 /// [autovectorization]: https://en.wikipedia.org/wiki/Automatic_vectorization
-pub struct Query<
-    'world,
-    // Note that `'state` is only used in the default type for `S`.
-    // That's necessary to make `Query<D, F>` be a valid `SystemParam`.
-    'state,
-    D: QueryData,
-    F: QueryFilter = (),
-    S: Deref<Target = QueryState<D, F>> = &'state QueryState<D, F>,
-> {
+pub type Query<'world, 'state, D, F = ()> = QueryBase<'world, D, F, &'state QueryState<D, F>>;
+
+/// The "base type" for [`Query`] and [`QueryLens`].
+///
+/// It is generic over the [`QueryState`] storage type, allowing code reuse
+/// between owned and borrowed query states.
+pub struct QueryBase<'world, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>> {
     // SAFETY: Must have access to the components registered in `state`.
     world: UnsafeWorldCell<'world>,
     state: S,
     last_run: Tick,
     this_run: Tick,
-    // Note that `&'state QueryState<D, F>` won't work because
-    // `QueryLens` uses `'static`, but `D` and `F` might not be `'static`.
-    marker: PhantomData<(&'state (), fn() -> QueryState<D, F>)>,
 }
 
 impl<D: ReadOnlyQueryData, F: QueryFilter> Clone for Query<'_, '_, D, F> {
@@ -527,9 +522,7 @@ impl<D: QueryData, F: QueryFilter> core::fmt::Debug for Query<'_, '_, D, F> {
     }
 }
 
-impl<'w, 's, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>>
-    Query<'w, 's, D, F, S>
-{
+impl<'w, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>> QueryBase<'w, D, F, S> {
     /// Creates a new query.
     ///
     /// # Safety
@@ -549,7 +542,6 @@ impl<'w, 's, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>>
             state,
             last_run,
             this_run,
-            marker: PhantomData,
         }
     }
 
@@ -1970,7 +1962,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>>
         // SAFETY:
         // - This is memory safe because the original query had compatible access and was consumed.
         // - The world matches because it was the same one used to construct self.
-        unsafe { Query::new(self.world, Box::new(state), self.last_run, self.this_run) }
+        unsafe { QueryLens::new(self.world, Box::new(state), self.last_run, self.this_run) }
     }
 
     /// Gets a [`QueryLens`] with the same accesses as the existing query
@@ -2122,7 +2114,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>>
         // SAFETY:
         // - This is memory safe because the original query had compatible access and was consumed.
         // - The world matches because it was the same one used to construct self.
-        unsafe { Query::new(self.world, Box::new(state), self.last_run, self.this_run) }
+        unsafe { QueryLens::new(self.world, Box::new(state), self.last_run, self.this_run) }
     }
 }
 
@@ -2543,7 +2535,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> IntoIterator for Query<'w, 's, D, F> 
 }
 
 impl<'w, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>> IntoIterator
-    for &'w Query<'_, '_, D, F, S>
+    for &'w QueryBase<'_, D, F, S>
 {
     type Item = ROQueryItem<'w, 'w, D>;
     type IntoIter = QueryIter<'w, 'w, D::ReadOnly, F>;
@@ -2554,7 +2546,7 @@ impl<'w, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>> Into
 }
 
 impl<'w, D: QueryData, F: QueryFilter, S: Deref<Target = QueryState<D, F>>> IntoIterator
-    for &'w mut Query<'_, '_, D, F, S>
+    for &'w mut QueryBase<'_, D, F, S>
 {
     type Item = D::Item<'w, 'w>;
     type IntoIter = QueryIter<'w, 'w, D, F>;
@@ -2597,7 +2589,7 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter> Query<'w, 's, D, F> {
 /// A [`Query`] with an owned [`QueryState`].
 ///
 /// This is returned from methods like [`Query::transmute_lens`] that construct a fresh [`QueryState`].
-pub type QueryLens<'w, Q, F = ()> = Query<'w, 'static, Q, F, Box<QueryState<Q, F>>>;
+pub type QueryLens<'w, Q, F = ()> = QueryBase<'w, Q, F, Box<QueryState<Q, F>>>;
 
 impl<'w, Q: QueryData, F: QueryFilter> QueryLens<'w, Q, F> {
     /// Create a [`Query`] from the underlying [`QueryState`].
@@ -2620,7 +2612,6 @@ impl<'w, Q: ReadOnlyQueryData, F: QueryFilter> QueryLens<'w, Q, F> {
             state: &self.state,
             last_run: self.last_run,
             this_run: self.this_run,
-            marker: PhantomData,
         }
     }
 }
