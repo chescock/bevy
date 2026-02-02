@@ -179,6 +179,8 @@ impl<'w> DeferredWorld<'w> {
                     &mut Replace { entity },
                     &mut EntityComponentsTrigger {
                         components: &[component_id],
+                        old_archetype: Some(archetype),
+                        new_archetype: Some(archetype),
                     },
                     MaybeLocation::caller(),
                 );
@@ -222,6 +224,8 @@ impl<'w> DeferredWorld<'w> {
                     &mut Insert { entity },
                     &mut EntityComponentsTrigger {
                         components: &[component_id],
+                        old_archetype: Some(archetype),
+                        new_archetype: Some(archetype),
                     },
                     MaybeLocation::caller(),
                 );
