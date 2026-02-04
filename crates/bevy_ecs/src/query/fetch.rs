@@ -2830,8 +2830,6 @@ unsafe impl<D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static> QueryData
 }
 
 // SAFETY: All access is through `D`, which is read-only
-// The nested query does not access the entity from the outer query,
-// but the nested access also needs to be read-only because we can copy it.
 unsafe impl<D: ReadOnlyQueryData, F: QueryFilter> ReadOnlyQueryData for NestedQuery<D, F> {}
 
 // SAFETY: All access to other entities is through `D`, which is read-only and does not conflict.
