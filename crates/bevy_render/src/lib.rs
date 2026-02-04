@@ -95,7 +95,6 @@ use bevy_ecs::{
     prelude::*,
     schedule::{ScheduleBuildSettings, ScheduleLabel},
 };
-use bevy_image::{CompressedImageFormatSupport, CompressedImageFormats};
 use bevy_shader::{load_shader_library, Shader, ShaderLoader};
 use bevy_utils::prelude::default;
 use bevy_window::{PrimaryWindow, RawHandleWrapperHolder};
@@ -275,30 +274,11 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<Shader>()
             .init_asset_loader::<ShaderLoader>();
+        load_shader_library!(app, "maths.wgsl");
+        load_shader_library!(app, "color_operations.wgsl");
+        load_shader_library!(app, "bindless.wgsl");
 
-        let primary_window = app
-            .world_mut()
-            .query_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
-            .single(app.world())
-            .ok()
-            .cloned();
-
-        #[cfg(feature = "raw_vulkan_init")]
-        let raw_vulkan_init_settings = app
-            .world_mut()
-            .get_resource::<renderer::raw_vulkan_init::RawVulkanInitSettings>()
-            .cloned()
-            .unwrap_or_default();
-
-        let future_resources = FutureRenderResources::default();
-        if self.render_creation.create_render(
-            future_resources.clone(),
-            primary_window,
-            #[cfg(feature = "raw_vulkan_init")]
-            raw_vulkan_init_settings,
-        ) {
-            // Note that `future_resources` is not necessarily populated here yet.
-            app.insert_resource(future_resources);
+        if insert_future_resources(&self.render_creation, app.world_mut()) {
             // SAFETY: Plugins should be set up on the main thread.
             unsafe { initialize_render_app(app) };
         };
@@ -351,48 +331,50 @@ impl Plugin for RenderPlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        load_shader_library!(app, "maths.wgsl");
-        load_shader_library!(app, "color_operations.wgsl");
-        load_shader_library!(app, "bindless.wgsl");
         if let Some(future_render_resources) =
             app.world_mut().remove_resource::<FutureRenderResources>()
         {
+            let bevy_app::SubApps { main, sub_apps } = app.sub_apps_mut();
+            let render = sub_apps.get_mut(&RenderApp.intern()).unwrap();
             let render_resources = future_render_resources.0.lock().unwrap().take().unwrap();
-            let RenderResources(device, queue, adapter_info, render_adapter, instance, ..) =
-                render_resources;
 
-            let compressed_image_format_support = CompressedImageFormatSupport(
-                CompressedImageFormats::from_features(device.features()),
+            render_resources.unpack_into(
+                main.world_mut(),
+                render.world_mut(),
+                self.synchronous_pipeline_compilation,
             );
-
-            app.insert_resource(device.clone())
-                .insert_resource(queue.clone())
-                .insert_resource(adapter_info.clone())
-                .insert_resource(render_adapter.clone())
-                .insert_resource(compressed_image_format_support);
-
-            let render_app = app.sub_app_mut(RenderApp);
-
-            #[cfg(feature = "raw_vulkan_init")]
-            {
-                let additional_vulkan_features: renderer::raw_vulkan_init::AdditionalVulkanFeatures =
-                    render_resources.5;
-                render_app.insert_resource(additional_vulkan_features);
-            }
-
-            render_app
-                .insert_resource(instance)
-                .insert_resource(PipelineCache::new(
-                    device.clone(),
-                    render_adapter.clone(),
-                    self.synchronous_pipeline_compilation,
-                ))
-                .insert_resource(device)
-                .insert_resource(queue)
-                .insert_resource(render_adapter)
-                .insert_resource(adapter_info);
         }
     }
+}
+
+/// Inserts a [`FutureRenderResources`] created from this [`RenderCreation`].
+///
+/// Returns true if creation was successful, false otherwise.
+fn insert_future_resources(render_creation: &RenderCreation, main_world: &mut World) -> bool {
+    let primary_window = main_world
+        .query_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
+        .single(main_world)
+        .ok()
+        .cloned();
+
+    #[cfg(feature = "raw_vulkan_init")]
+    let raw_vulkan_init_settings = main_world
+        .get_resource::<renderer::raw_vulkan_init::RawVulkanInitSettings>()
+        .cloned()
+        .unwrap_or_default();
+
+    let future_resources = FutureRenderResources::default();
+    let success = render_creation.create_render(
+        future_resources.clone(),
+        primary_window,
+        #[cfg(feature = "raw_vulkan_init")]
+        raw_vulkan_init_settings,
+    );
+    if success {
+        // Note that `future_resources` is not necessarily populated here yet.
+        main_world.insert_resource(future_resources);
+    }
+    success
 }
 
 /// A "scratch" world used to avoid allocating new worlds every frame when
