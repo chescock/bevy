@@ -1,6 +1,6 @@
 ---
 title: Lifecycle observers include old and new archetypes
-pull_requests: []
+pull_requests: [22828]
 ---
 
 Lifecycle observers now include information about the old and new archetypes during a change in the `EntityComponentsTrigger`.
