@@ -1205,7 +1205,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, T: QueryType> Query<'w, 's, D, F, T> 
     /// ```
     ///
     /// A mutable version: [`Self::contiguous_iter_mut`]
-    pub fn contiguous_iter(&self) -> Option<QueryContiguousIter<'_, 's, D::ReadOnly, F>>
+    pub fn contiguous_iter(&self) -> Option<QueryContiguousIter<'_, '_, D::ReadOnly, F>>
     where
         D::ReadOnly: ContiguousQueryData,
         F: ArchetypeFilter,
@@ -1246,28 +1246,12 @@ impl<'w, 's, D: QueryData, F: QueryFilter, T: QueryType> Query<'w, 's, D, F, T> 
     /// }
     /// ```
     /// An immutable version: [`Self::contiguous_iter`]
-    pub fn contiguous_iter_mut(&mut self) -> Option<QueryContiguousIter<'_, 's, D, F>>
+    pub fn contiguous_iter_mut(&mut self) -> Option<QueryContiguousIter<'_, '_, D, F>>
     where
         D: ContiguousQueryData,
         F: ArchetypeFilter,
     {
         self.reborrow().contiguous_iter_inner().ok()
-    }
-
-    /// Returns a contiguous iterator over the query results for the given
-    /// [`World`](crate::world::World) or [`Err`] with this [`Query`] if the query is not dense hence not contiguously
-    /// iterable.
-    /// This consumes the [`Query`] to return results with the actual "inner" world lifetime.
-    pub fn contiguous_iter_inner(self) -> Result<QueryContiguousIter<'w, 's, D, F>, Self>
-    where
-        D: ContiguousQueryData,
-        F: ArchetypeFilter,
-    {
-        // SAFETY:
-        // - `self.world` has permission to access the required components
-        // - `self.world` was used to initialize `self.state`
-        unsafe { QueryContiguousIter::new(self.world, self.state, self.last_run, self.this_run) }
-            .ok_or(self)
     }
 
     /// Returns the read-only query item for the given [`Entity`].
@@ -2389,6 +2373,22 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
             this_run: self.this_run,
             batching_strategy: BatchingStrategy::new(),
         }
+    }
+
+    /// Returns a contiguous iterator over the query results for the given
+    /// [`World`](crate::world::World) or [`Err`] with this [`Query`] if the query is not dense hence not contiguously
+    /// iterable.
+    /// This consumes the [`Query`] to return results with the actual "inner" world lifetime.
+    pub fn contiguous_iter_inner(self) -> Result<QueryContiguousIter<'w, 's, D, F>, Self>
+    where
+        D: ContiguousQueryData,
+        F: ArchetypeFilter,
+    {
+        // SAFETY:
+        // - `self.world` has permission to access the required components
+        // - `self.world` was used to initialize `self.state`
+        unsafe { QueryContiguousIter::new(self.world, self.state, self.last_run, self.this_run) }
+            .ok_or(self)
     }
 
     /// Returns the query item for the given [`Entity`].
