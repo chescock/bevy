@@ -8,15 +8,14 @@ use crate::{
     entity::{Entity, EntityCloner, EntityClonerBuilder, EntityLocation, OptIn, OptOut},
     event::{EntityComponentsTrigger, EntityEvent},
     lifecycle::{Despawn, Remove, Replace, DESPAWN, REMOVE, REPLACE},
-    observer::Observer,
+    observer::IntoEntityObserver,
     query::{
-        has_conflicts, Access, DebugCheckedUnwrap, QueryAccessError, ReadOnlyQueryData,
+        has_conflicts, DebugCheckedUnwrap, QueryAccessError, ReadOnlyQueryData,
         ReleaseStateQueryData,
     },
     relationship::RelationshipHookMode,
     resource::Resource,
     storage::{SparseSets, Table},
-    system::IntoObserverSystem,
     world::{
         error::EntityComponentError, unsafe_world_cell::UnsafeEntityCell, ComponentEntry,
         DynamicComponentFetch, EntityMut, EntityRef, FilteredEntityMut, FilteredEntityRef, Mut,
@@ -39,6 +38,17 @@ use core::{any::TypeId, marker::PhantomData, mem::MaybeUninit};
 /// See also [`EntityMut`], which allows disjoint mutable access to multiple
 /// entities at once.  Unlike `EntityMut`, this type allows adding and
 /// removing components, and despawning the entity.
+///
+/// # Invariants and Risk
+///
+/// An [`EntityWorldMut`] may point to a despawned entity.
+/// You can check this via [`is_despawned`](Self::is_despawned).
+/// Using an [`EntityWorldMut`] of a despawned entity may panic in some contexts, so read method documentation carefully.
+///
+/// Unless you have strong reason to assume these invariants, you should generally avoid keeping an [`EntityWorldMut`] to an entity that is potentially not spawned.
+/// For example, when inserting a component, that component insert may trigger an observer that despawns the entity.
+/// So, when you don't have full knowledge of what commands may interact with this entity,
+/// do not further use this value without first checking [`is_despawned`](Self::is_despawned).
 pub struct EntityWorldMut<'w> {
     world: &'w mut World,
     entity: Entity,
@@ -109,18 +119,17 @@ impl<'w> EntityWorldMut<'w> {
 
     /// # Safety
     ///
-    ///  - `entity` must be valid for `world`: the generation should match that of the entity at the same index.
-    ///  - `location` must be sourced from `world`'s `Entities` and must exactly match the location for `entity`
+    ///  The `location` must be sourced from `world`'s `Entities` and must exactly match the location for `entity`.
+    ///  If the `entity` is not spawned for any reason (See [`EntityNotSpawnedError`](crate::entity::EntityNotSpawnedError)), the location should be `None`.
     ///
-    ///  The above is trivially satisfied if `location` was sourced from `world.entities().get(entity)`.
+    ///  The above is trivially satisfied if `location` was sourced from `world.entities().get_spawned(entity).ok()`.
     #[inline]
     pub(crate) unsafe fn new(
         world: &'w mut World,
         entity: Entity,
         location: Option<EntityLocation>,
     ) -> Self {
-        debug_assert!(world.entities().contains(entity));
-        debug_assert_eq!(world.entities().get(entity).unwrap(), location);
+        debug_assert_eq!(world.entities().get_spawned(entity).ok(), location);
 
         EntityWorldMut {
             world,
@@ -132,25 +141,37 @@ impl<'w> EntityWorldMut<'w> {
     /// Consumes `self` and returns read-only access to all of the entity's
     /// components, with the world `'w` lifetime.
     pub fn into_readonly(self) -> EntityRef<'w> {
-        EntityRef::from(self)
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - Consuming `self` ensures no mutable accesses are active.
+        unsafe { EntityRef::new(self.into_unsafe_entity_cell()) }
     }
 
     /// Gets read-only access to all of the entity's components.
     #[inline]
     pub fn as_readonly(&self) -> EntityRef<'_> {
-        EntityRef::from(self)
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - `&self` ensures no mutable accesses are active.
+        unsafe { EntityRef::new(self.as_unsafe_entity_cell_readonly()) }
     }
 
     /// Consumes `self` and returns non-structural mutable access to all of the
     /// entity's components, with the world `'w` lifetime.
     pub fn into_mutable(self) -> EntityMut<'w> {
-        EntityMut::from(self)
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - Consuming `self` ensures there are no other accesses.
+        unsafe { EntityMut::new(self.into_unsafe_entity_cell()) }
     }
 
     /// Gets non-structural mutable access to all of the entity's components.
     #[inline]
     pub fn as_mutable(&mut self) -> EntityMut<'_> {
-        EntityMut::from(self)
+        // SAFETY:
+        // - We have exclusive access to the entire world.
+        // - `&mut self` ensures there are no other accesses.
+        unsafe { EntityMut::new(self.as_unsafe_entity_cell()) }
     }
 
     /// Returns the [ID](Entity) of the current entity.
@@ -717,6 +738,18 @@ impl<'w> EntityWorldMut<'w> {
         self.as_readonly().get_change_ticks::<T>()
     }
 
+    /// Get the [`MaybeLocation`] from where the given [`Component`] was last changed from.
+    /// This contains information regarding the last place (in code) that changed this component and can be useful for debugging.
+    /// For more information, see [`Location`](https://doc.rust-lang.org/nightly/core/panic/struct.Location.html), and enable the `track_location` feature.
+    ///
+    /// # Panics
+    ///
+    /// If the entity has been despawned while this `EntityWorldMut` is still alive.
+    #[inline]
+    pub fn get_changed_by<T: Component>(&self) -> Option<MaybeLocation> {
+        self.as_readonly().get_changed_by::<T>()
+    }
+
     /// Retrieves the change ticks for the given [`ComponentId`]. This can be useful for implementing change
     /// detection in custom runtimes.
     ///
@@ -859,8 +892,11 @@ impl<'w> EntityWorldMut<'w> {
         &mut self,
         component_ids: F,
     ) -> Result<F::Mut<'_>, EntityComponentError> {
-        self.as_mutable()
-            .into_mut_assume_mutable_by_id(component_ids)
+        // SAFETY: Upheld by caller
+        unsafe {
+            self.as_mutable()
+                .into_mut_assume_mutable_by_id(component_ids)
+        }
     }
 
     /// Consumes `self` and returns [untyped mutable reference(s)](MutUntyped)
@@ -929,8 +965,11 @@ impl<'w> EntityWorldMut<'w> {
         self,
         component_ids: F,
     ) -> Result<F::Mut<'w>, EntityComponentError> {
-        self.into_mutable()
-            .into_mut_assume_mutable_by_id(component_ids)
+        // SAFETY: Upheld by caller
+        unsafe {
+            self.into_mutable()
+                .into_mut_assume_mutable_by_id(component_ids)
+        }
     }
 
     /// Adds a [`Bundle`] of components to the entity.
@@ -1060,13 +1099,16 @@ impl<'w> EntityWorldMut<'w> {
         component_id: ComponentId,
         component: OwningPtr<'_>,
     ) -> &mut Self {
-        self.insert_by_id_with_caller(
-            component_id,
-            component,
-            InsertMode::Replace,
-            MaybeLocation::caller(),
-            RelationshipHookMode::Run,
-        )
+        // SAFETY: Upheld by caller
+        unsafe {
+            self.insert_by_id_with_caller(
+                component_id,
+                component,
+                InsertMode::Replace,
+                MaybeLocation::caller(),
+                RelationshipHookMode::Run,
+            )
+        }
     }
 
     /// # Safety
@@ -1519,6 +1561,11 @@ impl<'w> EntityWorldMut<'w> {
     /// This returns the new [`Entity`], which you must manage.
     /// Note that this still increases the generation to differentiate different spawns of the same row.
     ///
+    /// Additionally, keep in mind the limitations documented in the type-level docs.
+    /// Unless you have full knowledge of this [`EntityWorldMut`]'s lifetime,
+    /// you may not assume that nothing else has taken responsibility of this [`Entity`].
+    /// If you are not careful, this could cause a double free.
+    ///
     /// This may be later [`spawn_at`](World::spawn_at).
     /// See [`World::despawn_no_free`] for details and usage examples.
     #[track_caller]
@@ -1554,6 +1601,8 @@ impl<'w> EntityWorldMut<'w> {
                     },
                     &mut EntityComponentsTrigger {
                         components: archetype.components(),
+                        old_archetype: Some(archetype),
+                        new_archetype: None,
                     },
                     caller,
                 );
@@ -1573,6 +1622,8 @@ impl<'w> EntityWorldMut<'w> {
                     },
                     &mut EntityComponentsTrigger {
                         components: archetype.components(),
+                        old_archetype: Some(archetype),
+                        new_archetype: None,
                     },
                     caller,
                 );
@@ -1593,6 +1644,8 @@ impl<'w> EntityWorldMut<'w> {
                     },
                     &mut EntityComponentsTrigger {
                         components: archetype.components(),
+                        old_archetype: Some(archetype),
+                        new_archetype: None,
                     },
                     caller,
                 );
@@ -1705,7 +1758,7 @@ impl<'w> EntityWorldMut<'w> {
     pub(crate) fn despawn_with_caller(mut self, caller: MaybeLocation) {
         self.despawn_no_free_with_caller(caller);
         if let Ok(None) = self.world.entities.get(self.entity) {
-            self.world.allocator.free(self.entity);
+            self.world.entity_allocator.free(self.entity);
         }
 
         // Otherwise:
@@ -1792,9 +1845,11 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// This is *only* required when using the unsafe function [`EntityWorldMut::world_mut`],
     /// which enables the location to change.
+    ///
+    /// Note that if the entity is not spawned for any reason,
+    /// this will have a location of `None`, leading some methods to panic.
     pub fn update_location(&mut self) {
-        self.location = self.world.entities().get(self.entity)
-            .expect("Attempted to update the location of a despawned entity, which is impossible. This was the result of performing an operation on this EntityWorldMut that queued a despawn command");
+        self.location = self.world.entities().get_spawned(self.entity).ok();
     }
 
     /// Returns if the entity has been despawned.
@@ -1848,7 +1903,7 @@ impl<'w> EntityWorldMut<'w> {
         }
     }
 
-    /// Creates an [`Observer`] watching for an [`EntityEvent`] of type `E` whose [`EntityEvent::event_target`]
+    /// Creates an [`Observer`](crate::observer::Observer) watching for an [`EntityEvent`] of type `E` whose [`EntityEvent::event_target`]
     /// targets this entity.
     ///
     /// # Panics
@@ -1857,20 +1912,17 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// Panics if the given system is an exclusive system.
     #[track_caller]
-    pub fn observe<E: EntityEvent, B: Bundle, M>(
-        &mut self,
-        observer: impl IntoObserverSystem<E, B, M>,
-    ) -> &mut Self {
+    pub fn observe<M>(&mut self, observer: impl IntoEntityObserver<M>) -> &mut Self {
         self.observe_with_caller(observer, MaybeLocation::caller())
     }
 
-    pub(crate) fn observe_with_caller<E: EntityEvent, B: Bundle, M>(
+    pub(crate) fn observe_with_caller<M>(
         &mut self,
-        observer: impl IntoObserverSystem<E, B, M>,
+        observer: impl IntoEntityObserver<M>,
         caller: MaybeLocation,
     ) -> &mut Self {
         self.assert_not_despawned();
-        let bundle = Observer::new(observer).with_entity(self.entity);
+        let bundle = observer.into_observer_for_entity(self.entity);
         move_as_ptr!(bundle);
         self.world.spawn_with_caller(bundle, caller);
         self.world.flush();
@@ -2186,86 +2238,58 @@ impl<'w> EntityWorldMut<'w> {
 }
 
 impl<'w> From<EntityWorldMut<'w>> for EntityRef<'w> {
+    #[inline]
     fn from(entity: EntityWorldMut<'w>) -> EntityRef<'w> {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe { EntityRef::new(entity.into_unsafe_entity_cell()) }
+        entity.into_readonly()
     }
 }
 
 impl<'a> From<&'a EntityWorldMut<'_>> for EntityRef<'a> {
+    #[inline]
     fn from(entity: &'a EntityWorldMut<'_>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        // - `&entity` ensures no mutable accesses are active.
-        unsafe { EntityRef::new(entity.as_unsafe_entity_cell_readonly()) }
+        entity.as_readonly()
     }
 }
 
 impl<'w> From<EntityWorldMut<'w>> for EntityMut<'w> {
+    #[inline]
     fn from(entity: EntityWorldMut<'w>) -> Self {
-        // SAFETY: `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe { EntityMut::new(entity.into_unsafe_entity_cell()) }
+        entity.into_mutable()
     }
 }
 
 impl<'a> From<&'a mut EntityWorldMut<'_>> for EntityMut<'a> {
     #[inline]
     fn from(entity: &'a mut EntityWorldMut<'_>) -> Self {
-        // SAFETY: `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe { EntityMut::new(entity.as_unsafe_entity_cell()) }
+        entity.as_mutable()
     }
 }
 
 impl<'a> From<EntityWorldMut<'a>> for FilteredEntityRef<'a, 'static> {
+    #[inline]
     fn from(entity: EntityWorldMut<'a>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe {
-            FilteredEntityRef::new(
-                entity.into_unsafe_entity_cell(),
-                const { &Access::new_read_all() },
-            )
-        }
+        entity.into_readonly().into_filtered()
     }
 }
 
 impl<'a> From<&'a EntityWorldMut<'_>> for FilteredEntityRef<'a, 'static> {
+    #[inline]
     fn from(entity: &'a EntityWorldMut<'_>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe {
-            FilteredEntityRef::new(
-                entity.as_unsafe_entity_cell_readonly(),
-                const { &Access::new_read_all() },
-            )
-        }
+        entity.as_readonly().into_filtered()
     }
 }
 
 impl<'a> From<EntityWorldMut<'a>> for FilteredEntityMut<'a, 'static> {
+    #[inline]
     fn from(entity: EntityWorldMut<'a>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe {
-            FilteredEntityMut::new(
-                entity.into_unsafe_entity_cell(),
-                const { &Access::new_write_all() },
-            )
-        }
+        entity.into_mutable().into_filtered()
     }
 }
 
 impl<'a> From<&'a mut EntityWorldMut<'_>> for FilteredEntityMut<'a, 'static> {
+    #[inline]
     fn from(entity: &'a mut EntityWorldMut<'_>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe {
-            FilteredEntityMut::new(
-                entity.as_unsafe_entity_cell(),
-                const { &Access::new_write_all() },
-            )
-        }
+        entity.as_mutable().into_filtered()
     }
 }
 
