@@ -2783,6 +2783,8 @@ impl<'w, 'q, Q: SingleEntityQueryData, F: QueryFilter> From<&'q mut Query<'w, '_
 ///
 /// Use [`Option<Single<D, F>>`] instead if zero or one matching entities can exist.
 ///
+/// Note that [`Single`] is not used as a search optimization. It is used as a validation with slight overhead compared to [`Query`].
+///
 /// See [`Query`] for more details.
 ///
 /// [System parameter]: crate::system::SystemParam

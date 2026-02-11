@@ -463,8 +463,8 @@ pub fn derive_query_data_impl(input: TokenStream) -> TokenStream {
 
                     fn iter_access(
                         _state: &Self::State,
-                    ) -> impl core::iter::Iterator<Item = #path::query::EcsAccessType<'_>> {
-                        core::iter::empty() #(.chain(<#field_types>::iter_access(&_state.#field_aliases)))*
+                    ) -> impl ::core::iter::Iterator<Item = #path::query::EcsAccessType<'_>> {
+                        ::core::iter::empty() #(.chain(<#field_types>::iter_access(&_state.#field_aliases)))*
                     }
                 }
 
@@ -545,8 +545,8 @@ pub fn derive_query_data_impl(input: TokenStream) -> TokenStream {
 
                 fn iter_access(
                     _state: &Self::State,
-                ) -> impl core::iter::Iterator<Item = #path::query::EcsAccessType<'_>> {
-                    core::iter::empty() #(.chain(<#field_types>::iter_access(&_state.#field_aliases)))*
+                ) -> impl ::core::iter::Iterator<Item = #path::query::EcsAccessType<'_>> {
+                    ::core::iter::empty() #(.chain(<#field_types>::iter_access(&_state.#field_aliases)))*
                 }
             }
 
