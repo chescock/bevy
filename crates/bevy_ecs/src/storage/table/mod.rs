@@ -3,7 +3,7 @@ use crate::{
     component::{ComponentId, ComponentInfo, Components},
     entity::Entity,
     query::DebugCheckedUnwrap,
-    storage::{AbortOnPanic, ImmutableSparseSet, SparseSet},
+    storage::{AbortOnPanic, SparseSet},
 };
 use alloc::{boxed::Box, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
@@ -143,9 +143,13 @@ pub(crate) struct TableBuilder {
 
 impl TableBuilder {
     /// Start building a new [`Table`] with a specified `column_capacity` (How many components per column?) and a `capacity` (How many columns?)
-    pub fn with_capacity(capacity: usize, column_capacity: usize) -> Self {
+    pub fn with_capacity(
+        capacity: usize,
+        column_capacity: usize,
+        max_component_id: Option<ComponentId>,
+    ) -> Self {
         Self {
-            columns: SparseSet::with_capacity(column_capacity),
+            columns: SparseSet::with_capacity(column_capacity, max_component_id),
             entities: Vec::with_capacity(capacity),
         }
     }
@@ -164,7 +168,7 @@ impl TableBuilder {
     #[must_use]
     pub fn build(self) -> Table {
         Table {
-            columns: self.columns.into_immutable(),
+            columns: self.columns,
             entities: self.entities,
         }
     }
@@ -188,7 +192,7 @@ impl TableBuilder {
 // it must be the correct capacity to allocate, reallocate, and deallocate all columns. This
 // means the safety invariant must be enforced even in `TableBuilder`.
 pub struct Table {
-    columns: ImmutableSparseSet<ComponentId, Column>,
+    columns: SparseSet<ComponentId, Column>,
     entities: Vec<Entity>,
 }
 
@@ -736,7 +740,7 @@ pub struct Tables {
 
 impl Default for Tables {
     fn default() -> Self {
-        let empty_table = TableBuilder::with_capacity(0, 0).build();
+        let empty_table = TableBuilder::with_capacity(0, 0, None).build();
         Tables {
             tables: vec![empty_table],
             table_ids: HashMap::default(),
@@ -806,7 +810,11 @@ impl Tables {
             .raw_entry_mut()
             .from_key(component_ids)
             .or_insert_with(|| {
-                let mut table = TableBuilder::with_capacity(0, component_ids.len());
+                let mut table = TableBuilder::with_capacity(
+                    0,
+                    component_ids.len(),
+                    component_ids.last().copied(),
+                );
                 for component_id in component_ids {
                     table = table.add_column(components.get_info_unchecked(*component_id));
                 }
@@ -901,7 +909,7 @@ mod tests {
             unsafe { ComponentsRegistrator::new(&mut components, &mut componentids) };
         let component_id = registrator.register_component::<W<TableRow>>();
         let columns = &[component_id];
-        let mut table = TableBuilder::with_capacity(0, columns.len())
+        let mut table = TableBuilder::with_capacity(0, columns.len(), columns.last().copied())
             .add_column(components.get_info(component_id).unwrap())
             .build();
         let entities = (0..200)
