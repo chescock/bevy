@@ -263,12 +263,37 @@ impl Table {
     ///
     /// # Safety
     /// - `row` must be in-bounds
+    /// - `removed_columns` must contain every component in `self` that is not in `new_table`,
+    ///   and may not contain any components in `new_table`.
     pub(crate) unsafe fn move_to_and_forget_missing_unchecked(
         &mut self,
         row: TableRow,
         new_table: &mut Table,
+        removed_columns: &[ComponentId],
     ) -> TableMoveResult {
         debug_assert!(row.index_u32() < self.entity_count());
+        new_table.reserve(1);
+        if self.entity_count() == 1
+            && new_table.is_empty()
+            && self.capacity() == new_table.capacity()
+        {
+            // The only entity in the old table will become the only entity in the new table.
+            // Rather than copy the contents of each column, just swap the tables themselves!
+            // Any extra columns in the old table will now be missing, and must be moved from the new table.
+            // Since all columns must have the same capacity, this is only possible if
+            // the two tables have the same capacity.
+            core::mem::swap(self, new_table);
+            for &component_id in removed_columns {
+                if let Some(column) = new_table.columns.remove(component_id) {
+                    self.columns.insert(component_id, column);
+                }
+            }
+            return TableMoveResult {
+                new_row: row,
+                swapped_entity: None,
+            };
+        }
+
         let last_element_index = self.entity_count() - 1;
         let is_last = row.index_u32() == last_element_index;
         let new_row = new_table.allocate(self.entities.swap_remove(row.index()));
@@ -305,13 +330,39 @@ impl Table {
     /// - Panics if the move forces a reallocation, and any of the new the reallocations causes an out-of-memory error.
     ///
     /// # Safety
-    /// row must be in-bounds
+    /// - row must be in-bounds
+    /// - `removed_columns` must contain every component in `self` that is not in `new_table`,
+    ///   and may not contain any components in `new_table`.
     pub(crate) unsafe fn move_to_and_drop_missing_unchecked(
         &mut self,
         row: TableRow,
         new_table: &mut Table,
+        removed_columns: &[ComponentId],
     ) -> TableMoveResult {
         debug_assert!(row.index_u32() < self.entity_count());
+        new_table.reserve(1);
+        if self.entity_count() == 1
+            && new_table.is_empty()
+            && self.capacity() == new_table.capacity()
+        {
+            // The only entity in the old table will become the only entity in the new table.
+            // Rather than copy the contents of each column, just swap the tables themselves!
+            // Any extra columns in the old table will now be missing, and must be moved from the new table.
+            // Since all columns must have the same capacity, this is only possible if
+            // the two tables have the same capacity.
+            core::mem::swap(self, new_table);
+            for &component_id in removed_columns {
+                if let Some(mut column) = new_table.columns.remove(component_id) {
+                    column.drop_last_component(0);
+                    self.columns.insert(component_id, column);
+                }
+            }
+            return TableMoveResult {
+                new_row: row,
+                swapped_entity: None,
+            };
+        }
+
         let last_element_index = self.entity_count() - 1;
         let is_last = row.index_u32() == last_element_index;
         let new_row = new_table.allocate(self.entities.swap_remove(row.index()));
@@ -349,12 +400,36 @@ impl Table {
     /// # Safety
     /// - `row` must be in-bounds
     /// - `new_table` must contain every component this table has
+    /// - `extra_columns` must be exactly the columns in `new_table` but not in `self`
     pub(crate) unsafe fn move_to_superset_unchecked(
         &mut self,
         row: TableRow,
         new_table: &mut Table,
+        extra_columns: &[ComponentId],
     ) -> TableMoveResult {
         debug_assert!(row.index_u32() < self.entity_count());
+        new_table.reserve(1);
+        if self.entity_count() == 1
+            && new_table.is_empty()
+            && self.capacity() == new_table.capacity()
+        {
+            // The only entity in the old table will become the only entity in the new table.
+            // Rather than copy the contents of each column, just swap the tables themselves!
+            // Any extra columns in the new table will now be missing, and must be moved from the old table.
+            // Since all columns must have the same capacity, this is only possible if
+            // the two tables have the same capacity.
+            core::mem::swap(self, new_table);
+            for &component_id in extra_columns {
+                if let Some(column) = self.columns.remove(component_id) {
+                    new_table.columns.insert(component_id, column);
+                }
+            }
+            return TableMoveResult {
+                new_row: row,
+                swapped_entity: None,
+            };
+        }
+
         let last_element_index = self.entity_count() - 1;
         let is_last = row.index_u32() == last_element_index;
         let new_row = new_table.allocate(self.entities.swap_remove(row.index()));
