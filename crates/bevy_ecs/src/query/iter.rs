@@ -930,11 +930,9 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
             .map(|(key, entity)| (key, NeutralOrd(entity)))
             .collect();
         f(&mut keyed_query);
-        let entity_iter = keyed_query
+        let entity_iter = erase_item_lifetimes::<L>(keyed_query)
             .into_iter()
-            .map(|(.., entity)| entity.0)
-            .collect::<Vec<_>>()
-            .into_iter();
+            .map(|(.., entity)| entity.0);
         // SAFETY:
         // `self.world` has permission to access the required components.
         // Each lens query item is dropped before the respective actual query item is accessed.
@@ -1926,11 +1924,9 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: EntityEquivalent>>
         // Re-collect into a `Vec` to eagerly drop the lens items.
         // They must be dropped before `fetch_next` is called since they may alias
         // with other data items if there are duplicate entities in `entity_iter`.
-        let entity_iter = keyed_query
+        let entity_iter = erase_item_lifetimes::<L>(keyed_query)
             .into_iter()
-            .map(|(.., entity)| entity.0)
-            .collect::<Vec<_>>()
-            .into_iter();
+            .map(|(.., entity)| entity.0);
         // SAFETY:
         // `self.world` has permission to access the required components.
         // Each lens query item is dropped before the respective actual query item is accessed.
@@ -2858,6 +2854,22 @@ impl<T> Ord for NeutralOrd<T> {
     }
 }
 
+fn erase_item_lifetimes<T: QueryData>(
+    source: Vec<(T::Item<'_, '_>, NeutralOrd<Entity>)>,
+) -> Vec<(MaybeUninit<T::Item<'static, 'static>>, NeutralOrd<Entity>)> {
+    // Trick to erase lifetimes without reallocation taken from
+    // https://davidlattimore.github.io/posts/2025/09/02/rustforge-wild-performance-tricks.html
+    // The stdlib can re-use the allocation when re-collecting a `Vec` like this.
+    // Using `MaybeUninit` with `'static` lifetimes ensures that
+    // the size and layout of the result is the same.
+    // If `T::Item` has no `Drop`, which it will not for most `QueryData`,
+    // then the optimizer will remove the loop entirely.
+    source
+        .into_iter()
+        .map(|(_, entity)| (MaybeUninit::uninit(), entity))
+        .collect()
+}
+
 #[cfg(test)]
 #[expect(clippy::print_stdout, reason = "Allowed in tests.")]
 mod tests {
@@ -2867,6 +2879,7 @@ mod tests {
     use crate::component::Component;
     use crate::entity::Entity;
     use crate::prelude::{With, World};
+    use crate::query::iter::{erase_item_lifetimes, NeutralOrd};
 
     #[derive(Component, Debug, PartialEq, PartialOrd, Clone, Copy)]
     struct A(f32);
@@ -3219,5 +3232,26 @@ mod tests {
                 .sort_by_cached_key::<&C, _>(|d| d.0);
             while query.fetch_next().is_some() {}
         }
+    }
+
+    #[test]
+    fn erase_item_lifetimes_does_not_reallocate() {
+        #[derive(Component)]
+        struct C;
+
+        let mut world = World::new();
+        world.spawn_batch((0..10).map(|_| C));
+        let source: Vec<_> = world
+            .query::<(&mut C, Entity)>()
+            .query_mut(&mut world)
+            .into_iter()
+            .map(|(c, entity)| (c, NeutralOrd(entity)))
+            .collect();
+        let source_ptr = source.as_ptr();
+        let result = erase_item_lifetimes::<&mut C>(source);
+        let result_ptr = result.as_ptr();
+        // The pointer has the same value before and after the conversion,
+        // so `Vec` was able to re-use the same allocation.
+        assert_eq!(source_ptr, result_ptr.cast());
     }
 }
