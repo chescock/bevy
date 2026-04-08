@@ -202,8 +202,8 @@ pub fn editable_text_system(
         info.glyphs.clear();
         info.run_geometry.clear();
 
-        for line in layout.lines() {
-            for (line_index, item) in line.items().enumerate() {
+        for (line_index, line) in layout.lines().enumerate() {
+            for item in line.items() {
                 match item {
                     PositionedLayoutItem::GlyphRun(glyph_run) => {
                         let brush = glyph_run.style().brush;
@@ -262,8 +262,6 @@ pub fn editable_text_system(
                                 atlas_info,
                                 section_index: brush.section_index as usize,
                                 line_index,
-                                byte_index: line.text_range().start,
-                                byte_length: line.text_range().len(),
                             });
                         }
 

@@ -13,8 +13,8 @@ use bevy::{
 };
 use rand::RngExt;
 
+use crate::assets::CityAssets;
 use crate::generate_city::{spawn_city, CityRoot};
-use crate::{assets::CityAssets, CitySpawned};
 
 #[derive(Resource)]
 pub struct Settings {
@@ -35,6 +35,10 @@ impl Default for Settings {
             cpu_culling: true,
         }
     }
+}
+
+pub fn setup_settings_ui(mut commands: Commands) {
+    commands.spawn_scene(settings_ui());
 }
 
 pub fn settings_ui() -> impl Scene {
@@ -160,8 +164,4 @@ pub fn settings_ui() -> impl Scene {
             ]
         )]
     }
-}
-
-pub fn setup_settings_ui(_: On<CitySpawned>, mut commands: Commands) {
-    commands.spawn_scene(settings_ui());
 }
