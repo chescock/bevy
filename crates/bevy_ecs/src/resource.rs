@@ -106,13 +106,6 @@ impl ResourceEntities {
         self.deref().get(id).copied()
     }
 
-    /// Removes the entry for the given resource component.
-    /// Returns the entity that was removed, or `None` if there was no entity.
-    #[inline]
-    pub(crate) fn remove(&mut self, id: ComponentId) -> Option<Entity> {
-        self.0.get_mut().remove(id)
-    }
-
     #[inline]
     fn deref(&self) -> &SparseArray<ComponentId, Entity> {
         // SAFETY: There are no other mutable references to the map.
@@ -262,7 +255,7 @@ mod tests {
             }
         });
         assert_eq!(world.entities().count_spawned(), start + 3);
-        let e3 = *world.resource_entities().get(id3).unwrap();
+        let e3 = world.resource_entities().get(id3).unwrap();
         assert!(world.remove_resource_by_id(id3));
         // the entity is stable: removing the resource should only remove the component from the entity, not despawn the entity
         assert_eq!(world.entities().count_spawned(), start + 3);
@@ -272,13 +265,13 @@ mod tests {
                 world.insert_resource_by_id(id3, ptr, MaybeLocation::caller());
             }
         });
-        assert_eq!(e3, *world.resource_entities().get(id3).unwrap());
+        assert_eq!(e3, world.resource_entities().get(id3).unwrap());
         // again, the entity is stable: see previous explanation
-        let e1 = *world.resource_entities().get(id1).unwrap();
+        let e1 = world.resource_entities().get(id1).unwrap();
         world.remove_resource::<TestResource1>();
         assert_eq!(world.entities().count_spawned(), start + 3);
         world.init_resource::<TestResource1>();
-        assert_eq!(e1, *world.resource_entities().get(id1).unwrap());
+        assert_eq!(e1, world.resource_entities().get(id1).unwrap());
         // make sure that trying to add a resource twice results, doesn't change the entity count
         world.insert_resource(TestResource2(String::from("Bar")));
         assert_eq!(world.entities().count_spawned(), start + 3);
