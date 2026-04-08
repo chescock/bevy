@@ -91,7 +91,7 @@ pub trait Resource: Component<Mutability = Mutable> {}
 pub struct ResourceEntities(SyncUnsafeCell<SparseArray<ComponentId, Entity>>);
 
 impl ResourceEntities {
-    /// Returns an iterator all registered resource components and their corresponding entity.
+    /// Returns an iterator over all registered resource components and their corresponding entity.
     ///
     /// This must scan the entire array of components to find non-empty values,
     /// which may be slow even if there are few resources.
