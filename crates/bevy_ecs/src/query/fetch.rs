@@ -2742,7 +2742,7 @@ impl<'__w, T: Component<Mutability = Mutable>> ContiguousQueryData for Mut<'__w,
 /// let &Data(data) = query.query(&mut world).get(child).unwrap();
 /// assert_eq!(data, 3);
 ///
-/// /// This is the relational query data.
+/// // This is the relational query data.
 /// // This will never actually be constructed,
 /// // and is only used as a `QueryData` type.
 /// pub struct Parent<D: ReadOnlyQueryData, F: QueryFilter = ()>(D, F);
