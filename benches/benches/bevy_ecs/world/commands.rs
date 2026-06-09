@@ -2,6 +2,7 @@ use core::hint::black_box;
 
 use bevy_ecs::{
     component::Component,
+    ptr::MovingPtr,
     system::{Command, Commands},
     world::{CommandQueue, World},
 };
@@ -159,8 +160,8 @@ struct FakeCommandB(u64);
 impl Command for FakeCommandA {
     type Out = ();
 
-    fn apply(self, world: &mut World) {
-        black_box(self);
+    fn apply(this: MovingPtr<Self>, world: &mut World) {
+        black_box(this.read());
         black_box(world);
     }
 }
@@ -168,8 +169,8 @@ impl Command for FakeCommandA {
 impl Command for FakeCommandB {
     type Out = ();
 
-    fn apply(self, world: &mut World) {
-        black_box(self);
+    fn apply(this: MovingPtr<Self>, world: &mut World) {
+        black_box(this.read());
         black_box(world);
     }
 }
@@ -207,8 +208,8 @@ struct SizedCommand<T: Default + Send + Sync + 'static>(T);
 impl<T: Default + Send + Sync + 'static> Command for SizedCommand<T> {
     type Out = ();
 
-    fn apply(self, world: &mut World) {
-        black_box(self);
+    fn apply(this: MovingPtr<Self>, world: &mut World) {
+        black_box(this.read());
         black_box(world);
     }
 }

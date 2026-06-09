@@ -4,6 +4,7 @@
 //! It also contains functions that return closures for use with
 //! [`Commands`](crate::system::Commands).
 
+use bevy_ptr::{deconstruct_moving_ptr, MovingPtr};
 use bevy_utils::prelude::DebugName;
 
 use crate::{
@@ -25,10 +26,18 @@ use crate::{
 ///
 /// The `Out` generic parameter is the returned "output" of the command.
 ///
+/// It is not usually necessary to implement this manually,
+/// as it is implemented for closures that accept `&mut World`.
+///
+/// If the command captures a large amount of data,
+/// you can use [`PtrCommand`] to avoid a copy.
+///
 /// # Usage
 ///
 /// ```
 /// # use bevy_ecs::prelude::*;
+/// # use bevy_ecs::system::command::PtrCommand;
+/// # use bevy_ptr::MovingPtr;
 /// // Our world resource
 /// #[derive(Resource, Default)]
 /// struct Counter(u64);
@@ -39,17 +48,31 @@ use crate::{
 /// impl Command for AddToCounter {
 ///     type Out = ();
 ///
-///     fn apply(self, world: &mut World) {
+///     fn apply(this: MovingPtr<Self>, world: &mut World) {
 ///         let mut counter = world.get_resource_or_insert_with(Counter::default);
-///         counter.0 += self.0;
+///         counter.0 += this.0;
 ///     }
 /// }
 ///
 /// fn some_system(mut commands: Commands) {
+///     // Using a named command type
 ///     commands.queue(AddToCounter(42));
+///
+///     // Using a closure
+///     let add_to = 42;
+///     commands.queue(move |world: &mut World| {
+///         let mut counter = world.get_resource_or_insert_with(Counter::default);
+///         counter.0 += add_to;
+///     });
+///
+///     // Using `PtrCommand`
+///     commands.queue(PtrCommand::new(add_to, |add_to, world| {
+///         let mut counter = world.get_resource_or_insert_with(Counter::default);
+///         counter.0 += *add_to;
+///     }));
 /// }
 /// ```
-pub trait Command: Send + 'static {
+pub trait Command: Sized + Send + 'static {
     /// The return type of [`apply`](Command::apply).
     type Out: CommandOutput;
 
@@ -58,7 +81,7 @@ pub trait Command: Send + 'static {
     /// This method is used to define what a command "does" when it is ultimately applied.
     /// Because this method takes `self`, you can store data or settings on the type that implements this trait.
     /// This data is set by the system or other source of the command, and then ultimately read in this method.
-    fn apply(self, world: &mut World) -> Self::Out;
+    fn apply(this: MovingPtr<Self>, world: &mut World) -> Self::Out;
 
     /// Takes a [`Command`] that returns a Result and uses a given error handler function to convert it into
     /// a [`Command`] that internally handles an error if it occurs and returns `()`.
@@ -66,12 +89,9 @@ pub trait Command: Send + 'static {
     fn handle_error_with(
         self,
         error_handler: impl FnOnce(BevyError, ErrorContext) + Send + 'static,
-    ) -> impl Command<Out = ()>
-    where
-        Self: Sized,
-    {
-        move |world: &mut World| {
-            if let Some(error) = self.apply(world).to_err() {
+    ) -> impl Command<Out = ()> {
+        PtrCommand::new(self, move |this, world| {
+            if let Some(error) = Self::apply(this, world).to_err() {
                 error_handler(
                     error,
                     ErrorContext::Command {
@@ -79,18 +99,15 @@ pub trait Command: Send + 'static {
                     },
                 );
             }
-        }
+        })
     }
 
     /// Takes a [`Command`] that returns a Result and uses the fallback error handler function to convert it into
     /// a [`Command`] that internally handles an error if it occurs and returns `()`.
     #[inline]
-    fn handle_error(self) -> impl Command<Out = ()>
-    where
-        Self: Sized,
-    {
-        move |world: &mut World| {
-            if let Some(error) = self.apply(world).to_err() {
+    fn handle_error(self) -> impl Command<Out = ()> {
+        PtrCommand::new(self, |this, world| {
+            if let Some(error) = Self::apply(this, world).to_err() {
                 world.fallback_error_handler()(
                     error,
                     ErrorContext::Command {
@@ -98,18 +115,15 @@ pub trait Command: Send + 'static {
                     },
                 );
             }
-        }
+        })
     }
 
     /// Takes a [`Command`] that returns a Result and ignores any error that occurs.
     #[inline]
-    fn ignore_error(self) -> impl Command<Out = ()>
-    where
-        Self: Sized,
-    {
-        move |world: &mut World| {
-            let _ = self.apply(world);
-        }
+    fn ignore_error(self) -> impl Command<Out = ()> {
+        PtrCommand::new(self, |this, world| {
+            let _ = Self::apply(this, world);
+        })
     }
 }
 
@@ -120,8 +134,49 @@ where
 {
     type Out = Out;
 
-    fn apply(self, world: &mut World) -> Out {
-        self(world)
+    fn apply(this: MovingPtr<Self>, world: &mut World) -> Out {
+        this.read()(world)
+    }
+}
+
+/// A [`Command`] that stores its data directly
+/// in the command buffer while executing.
+///
+/// This can be useful for commands with large data,
+/// since it avoids the need to copy it to the stack.
+pub struct PtrCommand<T, F> {
+    data: T,
+    func: F,
+}
+
+impl<T, F, Out> PtrCommand<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce(MovingPtr<T>, &mut World) -> Out + Send + 'static,
+    Out: CommandOutput,
+{
+    /// Creates a new [`PtrCommand`].
+    ///
+    /// The `data` will be stored as part of the command and
+    /// passed to `func` as a [`MovingPtr`] without being copied.
+    pub fn new(data: T, func: F) -> Self {
+        Self { data, func }
+    }
+}
+
+impl<T, F, Out> Command for PtrCommand<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce(MovingPtr<T>, &mut World) -> Out + Send + 'static,
+    Out: CommandOutput,
+{
+    type Out = Out;
+
+    fn apply(this: MovingPtr<Self>, world: &mut World) -> Self::Out {
+        deconstruct_moving_ptr!({
+            let Self { func, data } = this;
+        });
+        func.read()(data, world)
     }
 }
 
@@ -281,15 +336,11 @@ pub fn run_schedule(label: impl ScheduleLabel) -> impl Command {
 ///
 /// [`Observer`]: crate::observer::Observer
 #[track_caller]
-pub fn trigger<'a, E: Event<Trigger<'a>: Default>>(mut event: E) -> impl Command {
+pub fn trigger<'a, E: Event<Trigger<'a>: Default>>(event: E) -> impl Command {
     let caller = MaybeLocation::caller();
-    move |world: &mut World| {
-        world.trigger_ref_with_caller(
-            &mut event,
-            &mut <E::Trigger<'_> as Default>::default(),
-            caller,
-        );
-    }
+    PtrCommand::new(event, move |mut event, world| {
+        world.trigger_ref_with_caller(&mut *event, &mut Default::default(), caller);
+    })
 }
 
 /// Triggers the given [`Event`] using the given [`Trigger`], which will run any [`Observer`]s watching for it.
@@ -298,13 +349,14 @@ pub fn trigger<'a, E: Event<Trigger<'a>: Default>>(mut event: E) -> impl Command
 /// [`Observer`]: crate::observer::Observer
 #[track_caller]
 pub fn trigger_with<E: Event<Trigger<'static>: Send + Sync>>(
-    mut event: E,
-    mut trigger: E::Trigger<'static>,
+    event: E,
+    trigger: E::Trigger<'static>,
 ) -> impl Command {
     let caller = MaybeLocation::caller();
-    move |world: &mut World| {
-        world.trigger_ref_with_caller(&mut event, &mut trigger, caller);
-    }
+    PtrCommand::new((event, trigger), move |mut data, world| {
+        let (event, trigger) = &mut *data;
+        world.trigger_ref_with_caller(event, trigger, caller);
+    })
 }
 
 /// A [`Command`] that writes an arbitrary [`Message`].

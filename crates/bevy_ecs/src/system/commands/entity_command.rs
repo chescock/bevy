@@ -19,16 +19,22 @@ use crate::{
     name::Name,
     observer::IntoEntityObserver,
     relationship::RelationshipHookMode,
-    system::Command,
-    world::{error::EntityMutableFetchError, EntityWorldMut, FromWorld, World},
+    system::{command::PtrCommand, Command},
+    world::{error::EntityMutableFetchError, EntityWorldMut, FromWorld},
 };
-use bevy_ptr::{move_as_ptr, OwningPtr};
+use bevy_ptr::{deconstruct_moving_ptr, move_as_ptr, MovingPtr, OwningPtr};
 
 /// A command which gets executed for a given [`Entity`].
 ///
 /// Should be used with [`EntityCommands::queue`](crate::system::EntityCommands::queue).
 ///
 /// The `Out` generic parameter is the returned "output" of the command.
+///
+/// It is not usually necessary to implement this manually,
+/// as it is implemented for closures that accept `EntityWorldMut`.
+///
+/// If the command captures a large amount of data,
+/// you can use [`PtrEntityCommand`] to avoid a copy.
 ///
 /// # Examples
 ///
@@ -83,24 +89,21 @@ use bevy_ptr::{move_as_ptr, OwningPtr};
 ///     assert_eq!(names, HashSet::from_iter(["Entity #0", "Entity #1"]));
 /// }
 /// ```
-pub trait EntityCommand: Send + 'static {
+pub trait EntityCommand: Sized + Send + 'static {
     /// The return type of [`apply`](EntityCommand::apply).
     type Out: EntityCommandOutput;
 
     /// Executes this command for the given [`Entity`].
-    fn apply(self, entity: EntityWorldMut) -> Self::Out;
+    fn apply(this: MovingPtr<Self>, entity: EntityWorldMut) -> Self::Out;
 
     /// Passes in a specific entity to an [`EntityCommand`], resulting in a [`Command`] that
     /// internally runs the [`EntityCommand`] on that entity.
     #[inline]
-    fn with_entity(self, entity: Entity) -> impl Command
-    where
-        Self: Sized,
-    {
-        move |world: &mut World| {
+    fn with_entity(self, entity: Entity) -> impl Command {
+        PtrCommand::new(self, move |this, world| {
             let entity = world.get_entity_mut(entity)?;
-            self.apply(entity).into_result()
-        }
+            Self::apply(this, entity).into_result()
+        })
     }
 }
 
@@ -122,8 +125,49 @@ where
 {
     type Out = Out;
 
-    fn apply(self, entity: EntityWorldMut) -> Self::Out {
-        self(entity)
+    fn apply(this: MovingPtr<Self>, entity: EntityWorldMut) -> Self::Out {
+        this.read()(entity)
+    }
+}
+
+/// An [`EntityCommand`] that stores its data directly
+/// in the command buffer while executing.
+///
+/// This can be useful for commands with large data,
+/// since it avoids the need to copy it to the stack.
+pub struct PtrEntityCommand<T, F> {
+    data: T,
+    func: F,
+}
+
+impl<T, F, Out> PtrEntityCommand<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce(MovingPtr<T>, EntityWorldMut) -> Out + Send + 'static,
+    Out: EntityCommandOutput,
+{
+    /// Creates a new [`PtrEntityCommand`].
+    ///
+    /// The `data` will be stored as part of the command and
+    /// passed to `func` as a [`MovingPtr`] without being copied.
+    pub fn new(data: T, func: F) -> Self {
+        Self { data, func }
+    }
+}
+
+impl<T, F, Out> EntityCommand for PtrEntityCommand<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce(MovingPtr<T>, EntityWorldMut) -> Out + Send + 'static,
+    Out: EntityCommandOutput,
+{
+    type Out = Out;
+
+    fn apply(this: MovingPtr<Self>, entity: EntityWorldMut) -> Self::Out {
+        deconstruct_moving_ptr!({
+            let Self { func, data } = this;
+        });
+        func.read()(data, entity)
     }
 }
 
@@ -131,10 +175,9 @@ where
 #[track_caller]
 pub fn insert(bundle: impl Bundle, mode: InsertMode) -> impl EntityCommand {
     let caller = MaybeLocation::caller();
-    move |mut entity: EntityWorldMut| {
-        move_as_ptr!(bundle);
+    PtrEntityCommand::new(bundle, move |bundle, mut entity| {
         entity.insert_with_caller(bundle, mode, caller, RelationshipHookMode::Run);
-    }
+    })
 }
 
 /// An [`EntityCommand`] that adds a dynamic component to an entity.

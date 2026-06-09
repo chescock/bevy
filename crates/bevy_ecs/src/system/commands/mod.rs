@@ -4,7 +4,6 @@ pub mod entity_command;
 #[cfg(feature = "std")]
 mod parallel_scope;
 
-use bevy_ptr::move_as_ptr;
 pub use command::Command;
 pub use entity_command::EntityCommand;
 
@@ -31,8 +30,8 @@ use crate::{
     resource::Resource,
     schedule::ScheduleLabel,
     system::{
-        BoxedSystem, Deferred, IntoSystem, RegisteredSystem, SystemId, SystemInput,
-        SystemParamValidationError,
+        command::PtrCommand, entity_command::PtrEntityCommand, BoxedSystem, Deferred, IntoSystem,
+        RegisteredSystem, SystemId, SystemInput, SystemParamValidationError,
     },
     world::{
         command_queue::RawCommandQueue, unsafe_world_cell::UnsafeWorldCell, CommandQueue,
@@ -399,12 +398,11 @@ impl<'w, 's> Commands<'w, 's> {
     pub fn spawn<T: Bundle>(&mut self, bundle: T) -> EntityCommands<'_> {
         let entity = self.allocator.alloc();
         let caller = MaybeLocation::caller();
-        self.queue(move |world: &mut World| {
-            move_as_ptr!(bundle);
+        self.queue(PtrCommand::new(bundle, move |bundle, world| {
             world
                 .spawn_at_with_caller(entity, bundle, caller)
                 .map(|_| ())
-        });
+        }));
         self.entity(entity)
     }
 
@@ -610,6 +608,7 @@ impl<'w, 's> Commands<'w, 's> {
     ///
     /// ```
     /// # use bevy_ecs::prelude::*;
+    /// # use bevy_ptr::MovingPtr;
     /// #[derive(Resource, Default)]
     /// struct Counter(u64);
     ///
@@ -618,9 +617,9 @@ impl<'w, 's> Commands<'w, 's> {
     /// impl Command for AddToCounter {
     ///     type Out = Result;
     ///
-    ///     fn apply(self, world: &mut World) -> Result {
+    ///     fn apply(this: MovingPtr<Self>, world: &mut World) -> Result {
     ///         let mut counter = world.get_resource_or_insert_with(Counter::default);
-    ///         let amount: u64 = self.0.parse()?;
+    ///         let amount: u64 = this.0.parse()?;
     ///         counter.0 += amount;
     ///         Ok(())
     ///     }
@@ -661,6 +660,7 @@ impl<'w, 's> Commands<'w, 's> {
     ///
     /// ```
     /// # use bevy_ecs::prelude::*;
+    /// # use bevy_ptr::MovingPtr;
     /// use bevy_ecs::error::warn;
     ///
     /// #[derive(Resource, Default)]
@@ -671,9 +671,9 @@ impl<'w, 's> Commands<'w, 's> {
     /// impl Command for AddToCounter {
     ///     type Out = Result;
     ///
-    ///     fn apply(self, world: &mut World) -> Result {
+    ///     fn apply(this: MovingPtr<Self>, world: &mut World) -> Result {
     ///         let mut counter = world.get_resource_or_insert_with(Counter::default);
-    ///         let amount: u64 = self.0.parse()?;
+    ///         let amount: u64 = this.0.parse()?;
     ///         counter.0 += amount;
     ///         Ok(())
     ///     }
@@ -1578,20 +1578,22 @@ impl<'a> EntityCommands<'a> {
     pub fn insert_if_neq<T: Component + PartialEq>(&mut self, component: T) -> &mut Self {
         let caller = MaybeLocation::caller();
 
-        self.queue(move |mut entity: EntityWorldMut| {
-            if entity
-                .get::<T>()
-                .is_none_or(|old_component| *old_component != component)
-            {
-                move_as_ptr!(component);
-                entity.insert_with_caller(
-                    component,
-                    InsertMode::Replace,
-                    caller,
-                    RelationshipHookMode::Run,
-                );
-            }
-        })
+        self.queue(PtrEntityCommand::new(
+            component,
+            move |component, mut entity| {
+                if entity
+                    .get::<T>()
+                    .is_none_or(|old_component| *old_component != *component)
+                {
+                    entity.insert_with_caller(
+                        component,
+                        InsertMode::Replace,
+                        caller,
+                        RelationshipHookMode::Run,
+                    );
+                }
+            },
+        ))
     }
 
     /// Adds a dynamic [`Component`] to the entity.

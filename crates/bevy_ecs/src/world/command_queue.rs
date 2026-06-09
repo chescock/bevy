@@ -5,7 +5,7 @@ use crate::{
 };
 
 use alloc::{boxed::Box, vec::Vec};
-use bevy_ptr::{OwningPtr, Unaligned};
+use bevy_ptr::{move_as_ptr, OwningPtr, Unaligned};
 use core::{
     fmt::Debug,
     mem::{size_of, MaybeUninit},
@@ -212,7 +212,8 @@ impl RawCommandQueue {
                     match world.as_deref_mut() {
                         // Apply command to the provided world...
                         Some(world) => {
-                            command.apply(world);
+                            move_as_ptr!(command);
+                            C::apply(command, world);
                             // The command may have queued up world commands, which we flush here to ensure they are also picked up.
                             // If the current command queue already the World Command queue, this will still behave appropriately because the global cursor
                             // is still at the current `stop`, ensuring only the newly queued Commands will be applied.
@@ -446,6 +447,7 @@ mod test {
         string::{String, ToString},
         sync::Arc,
     };
+    use bevy_ptr::MovingPtr;
     use core::{
         panic::AssertUnwindSafe,
         sync::atomic::{AtomicU32, Ordering},
@@ -473,7 +475,7 @@ mod test {
     impl Command for DropCheck {
         type Out = ();
 
-        fn apply(self, _: &mut World) {}
+        fn apply(_this: MovingPtr<Self>, _: &mut World) {}
     }
 
     #[test]
@@ -525,7 +527,7 @@ mod test {
     impl Command for SpawnCommand {
         type Out = ();
 
-        fn apply(self, world: &mut World) {
+        fn apply(_this: MovingPtr<Self>, world: &mut World) {
             world.spawn(A);
         }
     }
@@ -556,7 +558,7 @@ mod test {
     impl Command for PanicCommand {
         type Out = ();
 
-        fn apply(self, _: &mut World) {
+        fn apply(_this: MovingPtr<Self>, _: &mut World) {
             panic!("command is panicking");
         }
     }
@@ -709,7 +711,7 @@ mod test {
     impl Command for CommandWithPadding {
         type Out = ();
 
-        fn apply(self, _: &mut World) {}
+        fn apply(_this: MovingPtr<Self>, _: &mut World) {}
     }
 
     #[cfg(miri)]

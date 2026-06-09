@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use bevy_app::{App, Plugin, PostUpdate};
 use bevy_ecs::{
     change_detection::Tick,
+    ptr::MovingPtr,
     reflect::{AppTypeRegistry, ReflectComponent, ReflectResource},
     resource::Resource,
     system::{Command, Commands, Res, ResMut},
@@ -241,8 +242,8 @@ pub enum SaveSettingsSync {
 impl Command for SaveSettingsSync {
     type Out = ();
 
-    fn apply(self, world: &mut World) {
-        save_settings(world, false, self == SaveSettingsSync::Always);
+    fn apply(this: MovingPtr<Self>, world: &mut World) {
+        save_settings(world, false, *this == SaveSettingsSync::Always);
     }
 }
 
@@ -259,8 +260,8 @@ pub enum SaveSettings {
 impl Command for SaveSettings {
     type Out = ();
 
-    fn apply(self, world: &mut World) {
-        save_settings(world, true, self == SaveSettings::Always);
+    fn apply(this: MovingPtr<Self>, world: &mut World) {
+        save_settings(world, true, *this == SaveSettings::Always);
     }
 }
 
@@ -279,12 +280,12 @@ impl Default for SaveSettingsDeferred {
 impl Command for SaveSettingsDeferred {
     type Out = ();
 
-    fn apply(self, world: &mut World) {
+    fn apply(this: MovingPtr<Self>, world: &mut World) {
         let Some(mut registry) = world.get_resource_mut::<SettingsFileRegistry>() else {
             return;
         };
 
-        registry.save_timer.set_duration(self.0);
+        registry.save_timer.set_duration(this.0);
         registry.save_timer.reset();
         registry.save_timer.unpause();
     }
