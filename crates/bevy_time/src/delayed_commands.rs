@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use bevy_ecs::{prelude::*, system::command::spawn_batch, world::CommandQueue};
+use bevy_ecs::{prelude::*, world::CommandQueue};
 use bevy_platform::collections::HashMap;
 #[cfg(feature = "bevy_reflect")]
 use bevy_reflect::Reflect;
@@ -50,11 +50,11 @@ impl<'w, 's> DelayedCommands<'w, 's> {
             // We use the default Time<()> here intentionally to support custom clocks
             let time = world.resource::<Time>();
             let elapsed = time.elapsed();
-            for queue in queues.iter_mut() {
+            for queue in &mut queues {
                 // Turn relative delays into absolute elapsed times
                 queue.submit_at += elapsed;
             }
-            spawn_batch(queues).apply(world);
+            world.spawn_batch(queues);
         });
     }
 }
