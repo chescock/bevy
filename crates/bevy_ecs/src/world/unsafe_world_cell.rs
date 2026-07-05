@@ -19,7 +19,7 @@ use crate::{
     query::{DebugCheckedUnwrap, QueryAccessError, ReleaseStateQueryData, SingleEntityQueryData},
     resource::{Resource, ResourceEntities},
     storage::{ComponentSparseSet, Storages, Table},
-    world::RawCommandQueue,
+    system::Commands,
 };
 use bevy_platform::sync::atomic::Ordering;
 use bevy_ptr::{Ptr, UnsafeCellDeref};
@@ -686,17 +686,22 @@ impl<'w> UnsafeWorldCell<'w> {
             .get_with_ticks()
     }
 
-    // Returns a mutable reference to the underlying world's [`CommandQueue`].
+    /// Creates a [`Commands`] instance that pushes to the world's command queue
     /// # Safety
     /// It is the caller's responsibility to ensure that
     /// - the [`UnsafeWorldCell`] has permission to access the queue mutably
     /// - no mutable references to the queue exist at the same time
-    pub(crate) unsafe fn get_raw_command_queue(self) -> RawCommandQueue {
+    pub(crate) unsafe fn commands(self) -> Commands<'w, 'w> {
         self.assert_allows_mutable_access();
         // SAFETY:
         // - caller ensures there are no existing mutable references
         // - caller ensures that we have permission to access the queue
-        unsafe { (*self.ptr).command_queue.clone() }
+        let command_queue = unsafe { (*self.ptr).command_queue.clone() };
+
+        // SAFETY: command_queue is stored on world and always valid while the world exists
+        unsafe {
+            Commands::new_raw_from_entities(command_queue, self.entity_allocator(), self.entities())
+        }
     }
 
     /// # Safety

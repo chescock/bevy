@@ -1036,11 +1036,7 @@ impl World {
         // SAFETY:
         // - `&mut self` gives mutable access to the entire world, and prevents simultaneous access.
         // - Command queue access does not conflict with entity access.
-        let raw_queue = unsafe { cell.get_raw_command_queue() };
-        // SAFETY: `&mut self` ensures the commands does not outlive the world.
-        let commands = unsafe {
-            Commands::new_raw_from_entities(raw_queue, cell.entity_allocator(), cell.entities())
-        };
+        let commands = unsafe { cell.commands() };
 
         (fetcher, commands)
     }
