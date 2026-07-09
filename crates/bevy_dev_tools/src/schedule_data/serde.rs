@@ -6,6 +6,7 @@
 
 use bevy_ecs::{
     component::{ComponentId, Components},
+    query::InvertibleComponentIdSet,
     schedule::{
         ApplyDeferred, ConditionWithAccess, InternedScheduleLabel, NodeId, Schedule,
         ScheduleBuildMetadata, Schedules,
@@ -120,21 +121,16 @@ pub struct AccessData {
 
 impl AccessData {
     fn new(value: &bevy_ecs::query::Access, trace: &mut ComponentTrace) -> Self {
-        // NOTE: `try_reads` returns error if `reads_inverted=true`,
-        // thus `AccessData` always has `reads_inverted=false`
-        // Similarly for `try_writes` and `writes_inverted=false`
-        // We return empty vectors when inverted=true, however this should not be used by consumers.
-
-        let reads = value.try_reads();
-        let writes = value.try_writes();
+        let reads = value.reads();
+        let writes = value.writes();
 
         let (reads_inverted, reads) = match reads {
-            Ok(reads) => (false, trace.get_indexes(reads.iter())),
-            Err(_) => (true, vec![]),
+            InvertibleComponentIdSet::Included(reads) => (false, trace.get_indexes(reads.iter())),
+            InvertibleComponentIdSet::Excluded(reads) => (true, trace.get_indexes(reads.iter())),
         };
         let (writes_inverted, writes) = match writes {
-            Ok(writes) => (false, trace.get_indexes(writes.iter())),
-            Err(_) => (true, vec![]),
+            InvertibleComponentIdSet::Included(writes) => (false, trace.get_indexes(writes.iter())),
+            InvertibleComponentIdSet::Excluded(writes) => (true, trace.get_indexes(writes.iter())),
         };
 
         Self {
