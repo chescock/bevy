@@ -56,15 +56,15 @@ use crate::{
     schedule::{Schedule, ScheduleLabel, Schedules},
     storage::{NonSendData, Storages},
     system::Commands,
-    world::{
-        command_queue::RawCommandQueue,
-        error::{
-            EntityDespawnError, EntityMutableFetchError, TryInsertBatchError, TryRunScheduleError,
-        },
+    world::error::{
+        EntityDespawnError, EntityMutableFetchError, TryInsertBatchError, TryRunScheduleError,
     },
 };
-use alloc::{boxed::Box, vec::Vec};
-use bevy_platform::sync::atomic::{AtomicU32, Ordering};
+use alloc::vec::Vec;
+use bevy_platform::{
+    cell::SyncUnsafeCell,
+    sync::atomic::{AtomicU32, Ordering},
+};
 use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr, Ptr};
 use bevy_utils::prelude::DebugName;
 use core::{any::TypeId, fmt, mem::ManuallyDrop};
@@ -106,7 +106,14 @@ pub struct World {
     pub(crate) last_change_tick: Tick,
     pub(crate) last_check_tick: Tick,
     pub(crate) last_trigger_id: u32,
-    pub(crate) command_queue: RawCommandQueue,
+    /// # Safety
+    ///
+    /// This may be borrowing a buffer from an earlier [command frame],
+    /// and must not be moved out.
+    /// This means it must not be exposed as `&mut` to untrusted code.
+    ///
+    /// [command frame]: command_queue#command-frames
+    pub(crate) command_queue: SyncUnsafeCell<CommandQueue>,
 }
 
 impl Default for World {
@@ -128,22 +135,11 @@ impl Default for World {
             last_change_tick: Tick::new(0),
             last_check_tick: Tick::new(0),
             last_trigger_id: 0,
-            command_queue: RawCommandQueue::new(),
+            command_queue: Default::default(),
             component_ids: ComponentIds::default(),
         };
         world.bootstrap();
         world
-    }
-}
-
-impl Drop for World {
-    fn drop(&mut self) {
-        // SAFETY: Not passing a pointer so the argument is always valid
-        unsafe { self.command_queue.apply_or_drop_queued(None) };
-        // SAFETY: Pointers in internal command queue are only invalidated here
-        drop(unsafe { Box::from_raw(self.command_queue.bytes.as_ptr()) });
-        // SAFETY: Pointers in internal command queue are only invalidated here
-        drop(unsafe { Box::from_raw(self.command_queue.cursor.as_ptr()) });
     }
 }
 
@@ -302,14 +298,11 @@ impl World {
     /// Use [`World::flush`] to apply all queued commands
     #[inline]
     pub fn commands(&mut self) -> Commands<'_, '_> {
-        // SAFETY: command_queue is stored on world and always valid while the world exists
-        unsafe {
-            Commands::new_raw_from_entities(
-                self.command_queue.clone(),
-                &self.entity_allocator,
-                &self.entities,
-            )
-        }
+        Commands::new_from_entities(
+            self.command_queue.get_mut(),
+            &self.entity_allocator,
+            &self.entities,
+        )
     }
 
     /// Registers a new [`Component`] type and returns the [`ComponentId`] created for it.
@@ -1109,7 +1102,7 @@ impl World {
         let mut entity_location = Some(entity_location);
 
         // SAFETY: command_queue is not referenced anywhere else
-        if !unsafe { self.command_queue.is_empty() } {
+        if !self.command_queue.get_mut().is_empty() {
             self.flush();
             entity_location = self.entities().get_spawned(entity).ok();
         }
@@ -3055,13 +3048,10 @@ impl World {
     /// # Panics
     /// This will panic if any of the queued commands are [`spawn`](Commands::spawn).
     /// If this is possible, you should instead use [`flush`](Self::flush).
+    #[inline]
     pub(crate) fn flush_commands(&mut self) {
-        // SAFETY: `self.command_queue` is only de-allocated in `World`'s `Drop`
-        if !unsafe { self.command_queue.is_empty() } {
-            // SAFETY: `self.command_queue` is only de-allocated in `World`'s `Drop`
-            unsafe {
-                self.command_queue.clone().apply_or_drop_queued(Some(self));
-            };
+        if !self.command_queue.get_mut().is_empty() {
+            CommandQueue::flush_world_commands(self);
         }
     }
 

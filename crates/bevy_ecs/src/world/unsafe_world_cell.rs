@@ -696,12 +696,9 @@ impl<'w> UnsafeWorldCell<'w> {
         // SAFETY:
         // - caller ensures there are no existing mutable references
         // - caller ensures that we have permission to access the queue
-        let command_queue = unsafe { (*self.ptr).command_queue.clone() };
+        let command_queue = unsafe { &mut *self.unsafe_world().command_queue.get() };
 
-        // SAFETY: command_queue is stored on world and always valid while the world exists
-        unsafe {
-            Commands::new_raw_from_entities(command_queue, self.entity_allocator(), self.entities())
-        }
+        Commands::new_from_entities(command_queue, self.entity_allocator(), self.entities())
     }
 
     /// # Safety
