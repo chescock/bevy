@@ -94,6 +94,7 @@ use bevy_ptr::MovingPtr;
 use core::{
     alloc::Layout,
     fmt::Debug,
+    hint::cold_path,
     marker::PhantomData,
     mem::{forget, size_of, ManuallyDrop},
     num::NonZero,
@@ -745,6 +746,7 @@ impl Drop for WorldCommandQueueRunner<'_> {
             }
         } else if self.command_queue.owned {
             if world_queue.owned {
+                cold_path();
                 // A larger buffer has been allocated,
                 // so free the older buffer.
                 // SAFETY: This pointer was returned from `alloc(self.command_queue.layout)`
