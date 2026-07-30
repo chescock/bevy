@@ -1247,3 +1247,41 @@ mod test {
         world.flush_commands();
     }
 }
+
+use crate::prelude::*;
+
+#[derive(Default, Component)]
+struct Matrix([[f32; 4]; 4]);
+
+#[derive(Default, Component)]
+struct Vec3([f32; 3]);
+
+#[unsafe(no_mangle)]
+#[inline(never)]
+pub fn asm_insert_commands(
+    command_queue: &mut CommandQueue,
+    world: &mut World,
+    entities: &[Entity],
+) {
+    let mut commands = Commands::new(command_queue, world);
+    for entity in entities {
+        commands
+            .entity(*entity)
+            .insert((Matrix::default(), Vec3::default()));
+    }
+    command_queue.apply(world);
+}
+
+const ENTITY_COUNT: usize = 10_000;
+
+#[derive(Component)]
+struct A;
+
+#[unsafe(no_mangle)]
+#[inline(never)]
+pub fn asm_spawn_one_zst(world: &mut World) {
+    for _ in 0..ENTITY_COUNT {
+        world.spawn(A);
+    }
+    world.clear_entities();
+}
