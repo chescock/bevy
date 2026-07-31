@@ -95,8 +95,7 @@ use core::{
     alloc::Layout,
     fmt::Debug,
     hint::cold_path,
-    marker::PhantomData,
-    mem::{forget, size_of, ManuallyDrop},
+    mem::{forget, size_of},
     num::NonZero,
     ptr::NonNull,
 };
@@ -423,7 +422,9 @@ impl CommandQueue {
         // flush the world's internal queue
         world.flush_commands();
 
-        let mut runner = CommandQueueRunner::new(self);
+        // SAFETY: TODO
+        let mut runner = unsafe { CommandQueueRunner::new(self) };
+        self.end = self.start;
         runner.run(Some(world));
         // If the commands all executed, then there is nothing to drop,
         // but the compiler does not seem to optimize out the loop.
@@ -552,7 +553,8 @@ impl Drop for CommandQueue {
             }
         }
         // Drop any commands in the queue by creating a `CommandQueueRunner` and dropping it.
-        drop(CommandQueueRunner::new(self));
+        // SAFETY: TODO
+        drop(unsafe { CommandQueueRunner::new(self) });
         if self.owned {
             // SAFETY: This pointer was returned from `alloc(self.layout)`
             // and not deallocated elsewhere.
@@ -577,7 +579,7 @@ impl SystemBuffer for CommandQueue {
 
 /// A RAII guard used while running commands to ensure
 /// that unapplied commands are dropped during unwind.
-struct CommandQueueRunner<'a> {
+struct CommandQueueRunner {
     /// A pointer to the next [command record],
     /// or [`Self::end`] if there are no more commands.
     ///
@@ -587,24 +589,20 @@ struct CommandQueueRunner<'a> {
     ///
     /// [command frame]: self#command-frames
     end: NonNull<u8>,
-    /// Use a lifetime to ensure that nothing else accesses the queue,
-    /// but don't actually store a reference anywhere.
-    marker: PhantomData<&'a mut CommandQueue>,
 }
 
-impl<'a> CommandQueueRunner<'a> {
-    fn new(command_queue: &'a mut CommandQueue) -> Self {
+impl CommandQueueRunner {
+    /// # Safety
+    ///
+    /// While this [CommandQueueRunner] is live,
+    /// - The current [command frame] must not be accessed elsewhere
+    /// - The buffer must not be deallocated
+    ///
+    /// [command frame]: self#command-frames
+    unsafe fn new(command_queue: &mut CommandQueue) -> Self {
         let cursor = command_queue.start_ptr();
         let end = command_queue.end_ptr();
-        // Empty the queue by setting the end of the [command frame] to the start.
-        // Doing this now instead of during `drop` means the reference does not need
-        // to be stored, and nothing else can access the queue to observe the difference.
-        command_queue.end = command_queue.start;
-        Self {
-            cursor,
-            end,
-            marker: PhantomData,
-        }
+        Self { cursor, end }
     }
 
     fn run(&mut self, mut world: Option<&mut World>) {
@@ -654,7 +652,7 @@ fn handle_panic_payload(
     world.fallback_error_handler()(error, ErrorContext::Command { name });
 }
 
-impl Drop for CommandQueueRunner<'_> {
+impl Drop for CommandQueueRunner {
     fn drop(&mut self) {
         // Drop any unapplied commands.
         // If `run` completed successfully then this will do nothing.
@@ -669,7 +667,8 @@ impl Drop for CommandQueueRunner<'_> {
 struct WorldCommandQueueRunner<'w> {
     world_id: WorldId,
     world: &'w mut World,
-    command_queue: ManuallyDrop<CommandQueue>,
+    start: usize,
+    owned_queue: Option<(NonNull<u8>, Layout)>,
 }
 
 impl<'a> WorldCommandQueueRunner<'a> {
@@ -684,19 +683,25 @@ impl<'a> WorldCommandQueueRunner<'a> {
         // and `WorldCommandQueueRunner` not being leaked.
 
         let world_queue = world.command_queue.get_mut();
-        let command_queue = ManuallyDrop::new(CommandQueue { ..*world_queue });
+        let start = world_queue.start;
+        let owned_queue = world_queue
+            .owned
+            .then_some((world_queue.buffer, world_queue.layout));
         // `owned` may have already been `false`, but it's harmless to set it again.
         world_queue.owned = false;
-        world_queue.start = command_queue.end;
         Self {
             world_id: world.id(),
             world,
-            command_queue,
+            start,
+            owned_queue,
         }
     }
 
     fn apply_queued(&mut self) {
-        let mut runner = CommandQueueRunner::new(&mut self.command_queue);
+        let world_queue = self.world.command_queue.get_mut();
+        // SAFETY: TODO
+        let mut runner = unsafe { CommandQueueRunner::new(world_queue) };
+        world_queue.start = world_queue.end;
         runner.run(Some(self.world));
         // If the commands all executed, then there is nothing to drop,
         // but the compiler does not seem to optimize out the loop.
@@ -716,20 +721,20 @@ impl Drop for WorldCommandQueueRunner<'_> {
 
         let world_queue = self.world.command_queue.get_mut();
         if self.world_id != self.world.id {
-            handle_swapped_world(world_queue, self.command_queue.end);
+            handle_swapped_world(world_queue, self.start);
             #[cold]
-            fn handle_swapped_world(world_queue: &mut CommandQueue, end: usize) {
+            fn handle_swapped_world(world_queue: &mut CommandQueue, start: usize) {
                 // It's possible for a command to replace the `World` itself.
                 // In that case, there may be references to the buffer
                 // through the original world, so the lease cannot be ended
                 // and any queue owned by this runner must be leaked.
                 // Ensure the world's queue is owned, since that is the only
                 // way to be sure that no other commands are using part of it.
-                // Ensure `end <= layout.size()` so that `end_ptr()` is valid.
+                // Ensure `start <= layout.size()` so that the new `start_ptr()` is valid.
                 warn!("World was replaced during command application.");
-                if !world_queue.owned || world_queue.layout.size() < end {
-                    // Ensure the size is nonzero and that `world_queue.end <= world_queue.layout.size()`.
-                    let layout = Layout::from_size_align(end.max(1), world_queue.layout.align());
+                if !world_queue.owned || world_queue.layout.size() < start {
+                    // Ensure the size is nonzero and that `start <= world_queue.layout.size()`.
+                    let layout = Layout::from_size_align(start.max(1), world_queue.layout.align());
                     let layout = layout.unwrap().pad_to_align();
                     // SAFETY: `max(1)` ensures the size is nonzero
                     let buffer = NonNull::new(unsafe { alloc(layout) })
@@ -744,7 +749,7 @@ impl Drop for WorldCommandQueueRunner<'_> {
                     world_queue.owned = true;
                 }
             }
-        } else if self.command_queue.owned {
+        } else if let Some((buffer, layout)) = self.owned_queue {
             if world_queue.owned {
                 cold_path();
                 // A larger buffer has been allocated,
@@ -752,20 +757,15 @@ impl Drop for WorldCommandQueueRunner<'_> {
                 // SAFETY: This pointer was returned from `alloc(self.command_queue.layout)`
                 // and not deallocated elsewhere.
                 unsafe {
-                    dealloc(
-                        self.command_queue.buffer.as_ptr(),
-                        self.command_queue.layout,
-                    );
+                    dealloc(buffer.as_ptr(), layout);
                 }
             } else {
                 // Return ownership of the buffer back to the world's queue.
                 world_queue.owned = true;
             }
         }
-        // Note that `self.command_queue.start == self.command_queue.end`,
-        // because the `CommandQueueRunner` emptied the queue.
-        world_queue.start = self.command_queue.start;
-        world_queue.end = self.command_queue.start;
+        world_queue.start = self.start;
+        world_queue.end = self.start;
     }
 }
 
