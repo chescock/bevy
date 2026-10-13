@@ -828,7 +828,7 @@ mod tests {
         let mut world = World::new();
         let entities: Vec<Entity> = world.spawn_batch((0..1000).map(|i| (A(i), B(0)))).collect();
         // Every other entity.
-        let subset: UniqueEntityVec = entities.iter().copied().step_by(2).collect();
+        let subset = UniqueEntityVec::from_iter_slow(entities.iter().copied().step_by(2));
 
         let mut state = SystemState::<Query<(&A, &mut B)>>::new(&mut world);
         let mut query = state.get_mut(&mut world).unwrap();

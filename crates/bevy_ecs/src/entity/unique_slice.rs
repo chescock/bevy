@@ -1118,14 +1118,6 @@ impl<T: EntityEquivalent> From<UniqueEntityEquivalentVec<T>>
     }
 }
 
-impl<T: EntityEquivalent> FromIterator<T> for Box<UniqueEntityEquivalentSlice<T>> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        iter.into_iter()
-            .collect::<UniqueEntityEquivalentVec<T>>()
-            .into_boxed_slice()
-    }
-}
-
 impl<T: EntityEquivalent> FromEntitySetIterator<T> for Box<UniqueEntityEquivalentSlice<T>> {
     fn from_entity_set_iter<I: EntitySet<Item = T>>(iter: I) -> Self {
         iter.into_iter()

@@ -335,7 +335,7 @@ unsafe impl<I: EntitySetIterator> EntitySetIterator for iter::StepBy<I> {}
 ///
 /// See also: [`EntitySet`].
 // FIXME: When subtrait item shadowing stabilizes, this should be renamed and shadow `FromIterator::from_iter`
-pub trait FromEntitySetIterator<A: EntityEquivalent>: FromIterator<A> {
+pub trait FromEntitySetIterator<A: EntityEquivalent> {
     /// Creates a value from an [`EntitySetIterator`].
     fn from_entity_set_iter<T: EntitySet<Item = A>>(set_iter: T) -> Self;
 }
