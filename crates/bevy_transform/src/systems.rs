@@ -170,7 +170,7 @@ pub struct PropagateTransformsParams<'w, 's> {
         (
             MarkDirtySubtreesParams<'static, 'static>,
             NonStaticRootParams<'static, 'static>,
-            PropagateTransformParams<'static, 'static>,
+            Query<'static, 'static, ChildTransformsQueryData<'static>, BaseQueryFilter>,
         ),
     >,
 
@@ -259,12 +259,7 @@ type ChangedQuery<'w, 's> = Query<'w, 's, ChangedQueryData, (ChangedQueryFilter,
 
 type SourceTransformsQuery<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static mut GlobalTransform), BaseQueryFilter>;
-type ParentTransformsQuery<'w, 's> = Query<'w, 's, &'static GlobalTransform, BaseQueryFilter>;
-type TransformQueries<'w, 's> = (
-    ChangedQuery<'w, 's>,
-    SourceTransformsQuery<'w, 's>,
-    ParentTransformsQuery<'w, 's>,
-);
+type TransformQueries<'w, 's> = (ChangedQuery<'w, 's>, SourceTransformsQuery<'w, 's>);
 
 #[derive(SystemParam)]
 struct MarkDirtySubtreesParams<'w, 's> {
@@ -278,7 +273,6 @@ struct MarkDirtySubtreesTaskRunner<'w, 's, 'b, 'p> {
     tables: Query<'w, 's, TablesQueryData, BaseQueryFilter>,
     parents: Query<'w, 's, &'static ChildOf, BaseQueryFilter>,
     source_transforms: SourceTransformsQuery<'w, 's>,
-    parent_transforms: ParentTransformsQuery<'w, 's>,
 
     is_source: &'b BitsetStorage,
     is_not_source: &'b BitsetStorage,
@@ -375,7 +369,7 @@ impl TaskRunner for MarkDirtySubtreesTaskRunner<'_, '_, '_, '_> {
                     .expect("entity matches the base filters");
 
             if let Ok(parent) = self.parents.get(entity)
-                && let Ok(parent_transform) = self.parent_transforms.get(parent.get())
+                && let Ok((_, parent_transform)) = self.source_transforms.get(parent.get())
             {
                 global_transform.set_if_neq(parent_transform.mul_transform(*transform));
             } else {
@@ -444,13 +438,7 @@ fn mark_dirty_subtrees(
         MarkDirtySubtreesTaskRunner {
             tables: param.tables,
             parents: param.parents,
-            // SAFETY: `source_transforms` is only going to be used for accessing propagation sources transforms,
-            // while `parent_transforms` is only going to be used for reading their parent's transforms.
-            // The marking algorithm guarantees that propagation sources are roots of disjoint subtrees, so the parent of a
-            // propagation source cannot be a propagation source itself.
-            source_transforms: unsafe { param.transforms.unchecked_p1() },
-            // SAFETY: See source_transforms's SAFETY comment.
-            parent_transforms: unsafe { param.transforms.unchecked_p2() },
+            source_transforms: param.transforms.p1(),
             is_source,
             is_not_source,
             propagation_sources,
@@ -458,31 +446,16 @@ fn mark_dirty_subtrees(
     );
 }
 
-type ParentTransformQueryData<'a> = (Ref<'a, GlobalTransform>, Option<&'a Children>);
-
 type ChildTransformsQueryData<'a> = (
     &'a Transform,
-    Lazy<'a, 'a, &'a mut GlobalTransform>,
-    &'a ChildOf,
+    Lazy<'a, 'a, Mut<'a, GlobalTransform>>,
+    Option<&'a ChildOf>,
     TableId,
     TableRow,
     Option<&'a Children>,
 );
 
-#[derive(SystemParam)]
-struct PropagateTransformParams<'w, 's> {
-    transforms: ParamSet<
-        'w,
-        's,
-        (
-            Query<'static, 'static, ParentTransformQueryData<'static>, BaseQueryFilter>,
-            Query<'static, 'static, ChildTransformsQueryData<'static>, BaseQueryFilter>,
-        ),
-    >,
-}
-
 struct PropagateTransformTaskRunner<'o, 'w, 's> {
-    parent_transforms: Query<'w, 's, ParentTransformQueryData<'static>, BaseQueryFilter>,
     child_transforms: Query<'w, 's, ChildTransformsQueryData<'static>, BaseQueryFilter>,
     is_source: &'o BitsetStorage,
     is_not_source: &'o BitsetStorage,
@@ -506,9 +479,11 @@ impl TaskRunner for PropagateTransformTaskRunner<'_, '_, '_> {
         let entity = task;
 
         // Fetch the data for the current entity.
-        let Ok((parent_transform, children)) = self.parent_transforms.get(entity) else {
+        let Ok((_, mut parent_transform, _, _, _, children)) = self.child_transforms.get(entity)
+        else {
             return;
         };
+        let parent_transform = parent_transform.get().unwrap();
         let Some(children) = children else { return };
 
         let changed = parent_transform.is_changed();
@@ -539,6 +514,10 @@ impl TaskRunner for PropagateTransformTaskRunner<'_, '_, '_> {
                     child_children,
                 )) = (unsafe { self.child_transforms.get_unchecked(child) })
                 else {
+                    continue;
+                };
+
+                let Some(parent) = parent else {
                     continue;
                 };
 
@@ -584,7 +563,7 @@ impl TaskRunner for PropagateTransformTaskRunner<'_, '_, '_> {
 }
 
 fn propagate_transform_dirty_subtrees(
-    params: PropagateTransformParams<'_, '_>,
+    child_transforms: Query<ChildTransformsQueryData<'static>, BaseQueryFilter>,
     is_source: &BitsetStorage,
     is_not_source: &BitsetStorage,
     static_optimizations: StaticTransformOptimizations,
@@ -599,15 +578,8 @@ fn propagate_transform_dirty_subtrees(
             let _span = tracing::info_span!("transform propagation worker").entered();
             worker.run();
         },
-        #[expect(unsafe_code, reason = "Creating potentially overlapping queries")]
         PropagateTransformTaskRunner {
-            // SAFETY: this `Query` will only be used to access parents of propagation sources.
-            // Propagation sources are roots of disjoing subtrees so their parents cannot be part of
-            // propagation subtrees.
-            parent_transforms: unsafe { params.transforms.unchecked_p0() },
-            // SAFETY: this `Query` will only be used to access descendants of propagation sources,
-            // which are not propagation sources themselves.
-            child_transforms: unsafe { params.transforms.unchecked_p1() },
+            child_transforms,
             is_source,
             is_not_source,
             static_optimizations,
