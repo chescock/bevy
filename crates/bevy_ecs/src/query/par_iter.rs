@@ -1,14 +1,14 @@
+use core::marker::PhantomData;
+
 use crate::{
     batching::BatchingStrategy,
     change_detection::Tick,
-    entity::{EntityEquivalent, UniqueEntityEquivalentVec},
+    entity::{EntityEquivalent, UniqueEntityEquivalentSlice},
     query::{ArchetypeFilter, ContiguousQueryData, QueryContiguousIter, QueryEntityError},
     world::unsafe_world_cell::UnsafeWorldCell,
 };
 
 use super::{IterQueryData, QueryFilter, QueryItem, QueryState, ReadOnlyQueryData};
-
-use alloc::vec::Vec;
 
 /// A parallel iterator over query results of a [`Query`](crate::system::Query).
 ///
@@ -345,17 +345,25 @@ where
 ///
 /// [`Entity`]: crate::entity::Entity
 /// [`Query::par_iter_many`]: crate::system::Query::par_iter_many
-pub struct QueryParManyIter<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent> {
+pub struct QueryParManyIter<
+    'w,
+    's,
+    D: IterQueryData,
+    F: QueryFilter,
+    E: EntityEquivalent + Sync,
+    L: AsRef<[E]>,
+> {
     pub(crate) world: UnsafeWorldCell<'w>,
     pub(crate) state: &'s QueryState<D, F>,
-    pub(crate) entity_list: Vec<E>,
+    pub(crate) entity_list: L,
     pub(crate) last_run: Tick,
     pub(crate) this_run: Tick,
     pub(crate) batching_strategy: BatchingStrategy,
+    pub(crate) marker: PhantomData<fn(&L) -> &[E]>,
 }
 
-impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
-    QueryParManyIter<'w, 's, D, F, E>
+impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync, L: AsRef<[E]>>
+    QueryParManyIter<'w, 's, D, F, E, L>
 {
     /// Changes the batching strategy used when iterating.
     ///
@@ -444,6 +452,7 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             func(&mut init, item);
             init
         };
+        let entity_list = self.entity_list.as_ref();
         #[cfg(any(target_arch = "wasm32", not(feature = "multi_threaded")))]
         {
             let init = init();
@@ -456,7 +465,7 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             unsafe {
                 self.state
                     .query_unchecked_manual_with_ticks(self.world, self.last_run, self.this_run)
-                    .iter_many_inner(&self.entity_list)
+                    .iter_many_inner(entity_list)
                     .fold(init, func);
             }
         }
@@ -469,7 +478,7 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
                 unsafe {
                     self.state
                         .query_unchecked_manual_with_ticks(self.world, self.last_run, self.this_run)
-                        .iter_many_inner(&self.entity_list)
+                        .iter_many_inner(entity_list)
                         .fold(init, func);
                 }
             } else {
@@ -480,7 +489,7 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
                     self.state.par_many_fold_init_unchecked_manual(
                         init,
                         self.world,
-                        &self.entity_list,
+                        entity_list,
                         batch_size,
                         func,
                         self.last_run,
@@ -494,7 +503,7 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
     #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
     fn get_batch_size(&self, thread_count: usize) -> u32 {
         self.batching_strategy
-            .calc_batch_size(|| self.entity_list.len(), thread_count) as u32
+            .calc_batch_size(|| self.entity_list.as_ref().len(), thread_count) as u32
     }
 }
 
@@ -511,17 +520,25 @@ pub struct QueryParManyUniqueIter<
     D: IterQueryData,
     F: QueryFilter,
     E: EntityEquivalent + Sync,
+    L: AsRef<UniqueEntityEquivalentSlice<E>>,
 > {
     pub(crate) world: UnsafeWorldCell<'w>,
     pub(crate) state: &'s QueryState<D, F>,
-    pub(crate) entity_list: UniqueEntityEquivalentVec<E>,
+    pub(crate) entity_list: L,
     pub(crate) last_run: Tick,
     pub(crate) this_run: Tick,
     pub(crate) batching_strategy: BatchingStrategy,
+    pub(crate) marker: PhantomData<fn(&L) -> &[E]>,
 }
 
-impl<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
-    QueryParManyUniqueIter<'w, 's, D, F, E>
+impl<
+        'w,
+        's,
+        D: IterQueryData,
+        F: QueryFilter,
+        E: EntityEquivalent + Sync,
+        L: AsRef<UniqueEntityEquivalentSlice<E>>,
+    > QueryParManyUniqueIter<'w, 's, D, F, E, L>
 {
     /// Changes the batching strategy used when iterating.
     ///
@@ -610,6 +627,7 @@ impl<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             func(&mut init, item);
             init
         };
+        let entity_list = self.entity_list.as_ref();
         #[cfg(any(target_arch = "wasm32", not(feature = "multi_threaded")))]
         {
             let init = init();
@@ -622,7 +640,7 @@ impl<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             unsafe {
                 self.state
                     .query_unchecked_manual_with_ticks(self.world, self.last_run, self.this_run)
-                    .iter_many_unique_inner(self.entity_list)
+                    .iter_many_unique_inner(entity_list)
                     .fold(init, func);
             }
         }
@@ -635,7 +653,7 @@ impl<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
                 unsafe {
                     self.state
                         .query_unchecked_manual_with_ticks(self.world, self.last_run, self.this_run)
-                        .iter_many_unique_inner(self.entity_list)
+                        .iter_many_unique_inner(entity_list)
                         .fold(init, func);
                 }
             } else {
@@ -646,7 +664,7 @@ impl<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
                     self.state.par_many_unique_fold_init_unchecked_manual(
                         init,
                         self.world,
-                        &self.entity_list,
+                        entity_list,
                         batch_size,
                         func,
                         self.last_run,
@@ -660,6 +678,6 @@ impl<'w, 's, D: IterQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
     #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
     fn get_batch_size(&self, thread_count: usize) -> u32 {
         self.batching_strategy
-            .calc_batch_size(|| self.entity_list.len(), thread_count) as u32
+            .calc_batch_size(|| self.entity_list.as_ref().len(), thread_count) as u32
     }
 }

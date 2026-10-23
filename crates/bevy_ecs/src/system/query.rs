@@ -3,7 +3,7 @@ use bevy_utils::prelude::DebugName;
 use crate::{
     batching::BatchingStrategy,
     change_detection::Tick,
-    entity::{Entity, EntityEquivalent, EntitySet, EntitySetIterator, UniqueEntityArray},
+    entity::{Entity, EntityEquivalent, EntitySet, UniqueEntityArray, UniqueEntityEquivalentSlice},
     query::{
         ArchetypeFilter, ContiguousQueryData, DebugCheckedUnwrap, IterQueryData, NopWorldQuery,
         QueryCombinationIter, QueryContiguousIter, QueryContiguousParIter, QueryData,
@@ -1398,17 +1398,18 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// [`par_iter_many_unique_mut`]: Self::par_iter_many_unique_mut
     /// [`par_iter_mut`]: Self::par_iter_mut
     #[inline]
-    pub fn par_iter_many<EntityList: IntoIterator<Item: EntityEquivalent>>(
+    pub fn par_iter_many<E: EntityEquivalent + Sync, EntityList: AsRef<[E]>>(
         &self,
-        entities: EntityList,
-    ) -> QueryParManyIter<'_, 's, D::ReadOnly, F, EntityList::Item> {
+        entity_list: EntityList,
+    ) -> QueryParManyIter<'_, 's, D::ReadOnly, F, E, EntityList> {
         QueryParManyIter {
             world: self.world,
             state: self.state.as_readonly(),
-            entity_list: entities.into_iter().collect(),
+            entity_list,
             last_run: self.last_run,
             this_run: self.this_run,
             batching_strategy: BatchingStrategy::new(),
+            marker: PhantomData,
         }
     }
 
@@ -1428,17 +1429,21 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// [`par_iter_many_unique_mut`]: Self::par_iter_many_unique_mut
     /// [`par_iter_mut`]: Self::par_iter_mut
     #[inline]
-    pub fn par_iter_many_unique<EntityList: EntitySet<Item: Sync>>(
+    pub fn par_iter_many_unique<
+        E: EntityEquivalent + Sync,
+        EntityList: AsRef<UniqueEntityEquivalentSlice<E>>,
+    >(
         &self,
-        entities: EntityList,
-    ) -> QueryParManyUniqueIter<'_, 's, D::ReadOnly, F, EntityList::Item> {
+        entity_list: EntityList,
+    ) -> QueryParManyUniqueIter<'_, 's, D::ReadOnly, F, E, EntityList> {
         QueryParManyUniqueIter {
             world: self.world,
             state: self.state.as_readonly(),
-            entity_list: entities.into_iter().collect_set(),
+            entity_list,
             last_run: self.last_run,
             this_run: self.this_run,
             batching_strategy: BatchingStrategy::new(),
+            marker: PhantomData,
         }
     }
 
@@ -1458,20 +1463,24 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// [`par_iter_many_unique`]: Self::par_iter_many_unique
     /// [`par_iter_mut`]: Self::par_iter_mut
     #[inline]
-    pub fn par_iter_many_unique_mut<EntityList: EntitySet<Item: Sync>>(
+    pub fn par_iter_many_unique_mut<
+        E: EntityEquivalent + Sync,
+        EntityList: AsRef<UniqueEntityEquivalentSlice<E>>,
+    >(
         &mut self,
-        entities: EntityList,
-    ) -> QueryParManyUniqueIter<'_, 's, D, F, EntityList::Item>
+        entity_list: EntityList,
+    ) -> QueryParManyUniqueIter<'_, 's, D, F, E, EntityList>
     where
         D: IterQueryData,
     {
         QueryParManyUniqueIter {
             world: self.world,
             state: self.state,
-            entity_list: entities.into_iter().collect_set(),
+            entity_list,
             last_run: self.last_run,
             this_run: self.this_run,
             batching_strategy: BatchingStrategy::new(),
+            marker: PhantomData,
         }
     }
 
